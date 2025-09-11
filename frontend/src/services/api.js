@@ -24,11 +24,13 @@ export const materialsAPI = {
 
 // Compliance API
 export const complianceAPI = {
+  getByProject: (projectId) => api.get(`/compliance/project/${projectId}`),
   getDemo: () => api.get('/compliance/demo'),
 };
 
 // Ecological API
 export const ecologicalAPI = {
+  getByProject: (projectId) => api.get(`/ecological/project/${projectId}`),
   getDemo: () => api.get('/ecological/demo'),
 };
 

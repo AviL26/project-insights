@@ -1,325 +1,273 @@
 import React, { useState, useEffect } from 'react';
-import { Calculator, Package, MapPin, Layers, Download, BarChart3, Map, Maximize2 } from 'lucide-react';
-import SimpleMap from '../shared/SimpleMap';
-import { materialsAPI, projectsAPI } from '../../services/api';
-import { useProject } from '../../context/ProjectContext';
+import { 
+  Package, 
+  TrendingUp, 
+  AlertCircle, 
+  Download, 
+  Calculator,
+  Truck,
+  Clock,
+  DollarSign,
+  BarChart3
+} from 'lucide-react';
 
 const MaterialsDashboard = () => {
-  const { state } = useProject();
-  const [activeProject, setActiveProject] = useState('');
-  const [selectedMaterial, setSelectedMaterial] = useState('bio-enhanced-concrete');
-  const [mapExpanded, setMapExpanded] = useState(false);
-  const [materials, setMaterials] = useState([]);
-  const [projects, setProjects] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(true);
+  const [selectedView, setSelectedView] = useState('summary');
 
-  const projectStats = {
-    totalCost: 129500,
-    totalVolume: 645,
-    ecoScore: 8.7,
-    timelineWeeks: 12
+  // Mock loading effect
+  useEffect(() => {
+    const timer = setTimeout(() => setIsLoading(false), 1500);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Mock materials data
+  const materialsData = {
+    summary: {
+      totalCost: 2350000,
+      currency: '₪',
+      totalVolume: 1250,
+      deliveryWeeks: 8,
+      costPerM3: 1880
+    },
+    breakdown: [
+      { 
+        category: 'ECOncrete Mix', 
+        volume: 1250, 
+        unit: 'm³', 
+        unitCost: 1650, 
+        total: 2062500,
+        trend: 'stable',
+        description: 'Bio-enhanced marine concrete'
+      },
+      { 
+        category: 'Reinforcement Steel', 
+        volume: 120, 
+        unit: 'tonnes', 
+        unitCost: 1800, 
+        total: 216000,
+        trend: 'up',
+        description: 'Marine-grade rebar'
+      },
+      { 
+        category: 'Formwork', 
+        volume: 1500, 
+        unit: 'm²', 
+        unitCost: 35, 
+        total: 52500,
+        trend: 'down',
+        description: 'Reusable aluminum forms'
+      },
+      { 
+        category: 'Transport & Logistics', 
+        volume: 1, 
+        unit: 'project', 
+        unitCost: 19000, 
+        total: 19000,
+        trend: 'stable',
+        description: 'Delivery to site'
+      }
+    ]
   };
 
-  // Load projects from API
-  useEffect(() => {
-    const loadProjects = async () => {
-      try {
-        const response = await projectsAPI.getAll();
-        const apiProjects = response.data.map(project => ({
-          name: project.name,
-          coordinates: project.coordinates ? project.coordinates.split(',').map(coord => parseFloat(coord.trim())) : [32.0853, 34.7818],
-          status: project.permit_status === 'approved' ? 'Active' : 'Planning',
-          progress: 50,
-          type: project.structure_type || 'Unknown'
-        }));
-        setProjects(apiProjects);
-        
-        if (apiProjects.length > 0 && !activeProject) {
-          setActiveProject(apiProjects[0].name);
-        }
-      } catch (error) {
-        console.error('Failed to load projects:', error);
-      }
-    };
+  const LoadingSkeleton = () => (
+    <div className="animate-pulse space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        {[...Array(4)].map((_, i) => (
+          <div key={i} className="bg-gray-200 h-24 rounded-lg"></div>
+        ))}
+      </div>
+      <div className="bg-gray-200 h-64 rounded-lg"></div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="bg-gray-200 h-48 rounded-lg"></div>
+        <div className="bg-gray-200 h-48 rounded-lg"></div>
+      </div>
+    </div>
+  );
 
-    loadProjects();
-  }, []);
+  const MetricCard = ({ title, value, subtitle, icon: Icon, trend, color = 'blue' }) => (
+    <div className={`bg-gradient-to-r from-${color}-50 to-${color}-100 p-4 rounded-lg border border-${color}-200`}>
+      <div className="flex items-center justify-between mb-2">
+        <Icon size={20} className={`text-${color}-600`} />
+        {trend && (
+          <span className={`text-xs px-2 py-1 rounded-full ${
+            trend === 'up' ? 'bg-red-100 text-red-700' :
+            trend === 'down' ? 'bg-green-100 text-green-700' :
+            'bg-gray-100 text-gray-700'
+          }`}>
+            {trend === 'up' ? '↗' : trend === 'down' ? '↘' : '→'}
+          </span>
+        )}
+      </div>
+      <h3 className={`text-lg font-bold text-${color}-900`}>{value}</h3>
+      <p className={`text-sm text-${color}-700`}>{title}</p>
+      {subtitle && <p className={`text-xs text-${color}-600 mt-1`}>{subtitle}</p>}
+    </div>
+  );
 
-  // Load materials data
-  useEffect(() => {
-    const loadMaterials = async () => {
-      try {
-        setLoading(true);
-        const response = await materialsAPI.getDemo();
-        setMaterials(response.data.map(material => ({
-          ...material,
-          color: `bg-eco-blue-500`
-        })));
-      } catch (error) {
-        console.error('Failed to load materials:', error);
-        setMaterials([]);
-      } finally {
-        setLoading(false);
-      }
-    };
+  const MaterialsBreakdownTable = () => (
+    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+      <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
+        <h3 className="text-lg font-semibold text-gray-900">Materials Breakdown</h3>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="min-w-full divide-y divide-gray-200">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Material Category
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Quantity
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Unit Cost
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Total Cost
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Trend
+              </th>
+            </tr>
+          </thead>
+          <tbody className="bg-white divide-y divide-gray-200">
+            {materialsData.breakdown.map((item, index) => (
+              <tr key={index} className="hover:bg-gray-50">
+                <td className="px-6 py-4 whitespace-nowrap">
+                  <div>
+                    <div className="text-sm font-medium text-gray-900">{item.category}</div>
+                    <div className="text-sm text-gray-500">{item.description}</div>
+                  </div>
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                  {item.volume.toLocaleString()} {item.unit}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                  ₪{item.unitCost.toLocaleString()}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                  ₪{item.total.toLocaleString()}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap">
+                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                    item.trend === 'up' ? 'bg-red-100 text-red-800' :
+                    item.trend === 'down' ? 'bg-green-100 text-green-800' :
+                    'bg-gray-100 text-gray-800'
+                  }`}>
+                    {item.trend === 'up' ? 'Rising' : item.trend === 'down' ? 'Falling' : 'Stable'}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 
-    loadMaterials();
-  }, []);
-
-  const currentProject = projects.find(p => p.name === activeProject);
-
-  if (loading) {
+  if (isLoading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-eco-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading materials data...</p>
+      <div className="p-6">
+        <div className="flex items-center space-x-2 mb-6">
+          <Package size={24} className="text-gray-400" />
+          <h2 className="text-2xl font-semibold text-gray-400">Loading Materials Analysis...</h2>
         </div>
+        <LoadingSkeleton />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Command Center Header */}
-      <div className="bg-gradient-to-r from-eco-blue-700 to-eco-blue-800 text-white p-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold mb-1">Project Command Center</h1>
-            <p className="text-eco-blue-100">Real-time project oversight and material management</p>
-          </div>
-          <div className="flex items-center space-x-4">
-            <div className="text-right">
-              <p className="text-sm text-eco-blue-200">Active Projects</p>
-              <p className="text-xl font-bold">{projects.length}</p>
-            </div>
-            <button className="px-4 py-2 bg-white text-eco-blue-700 rounded-lg hover:bg-gray-100 flex items-center space-x-2 font-medium">
-              <Download size={16} />
-              <span>Export Report</span>
-            </button>
+    <div className="p-6 space-y-6">
+      {/* Header with view selector */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center space-x-3">
+          <Package size={24} className="text-eco-blue-600" />
+          <h2 className="text-2xl font-semibold text-gray-900">Materials Analysis</h2>
+        </div>
+        
+        <div className="flex items-center space-x-3">
+          <select 
+            value={selectedView}
+            onChange={(e) => setSelectedView(e.target.value)}
+            className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
+          >
+            <option value="summary">Summary View</option>
+            <option value="detailed">Detailed Breakdown</option>
+            <option value="timeline">Delivery Timeline</option>
+          </select>
+          
+          <button className="flex items-center space-x-2 px-4 py-2 bg-eco-blue-600 text-white rounded-lg hover:bg-eco-blue-700">
+            <Download size={18} />
+            <span>Export BOM</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Key Metrics Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <MetricCard
+          title="Total Project Cost"
+          value={`₪${materialsData.summary.totalCost.toLocaleString()}`}
+          subtitle={`₪${materialsData.summary.costPerM3}/m³`}
+          icon={DollarSign}
+          color="blue"
+        />
+        <MetricCard
+          title="Concrete Volume"
+          value={`${materialsData.summary.totalVolume.toLocaleString()} m³`}
+          subtitle="Bio-enhanced marine concrete"
+          icon={Package}
+          color="green"
+        />
+        <MetricCard
+          title="Delivery Timeline"
+          value={`${materialsData.summary.deliveryWeeks} weeks`}
+          subtitle="From order confirmation"
+          icon={Clock}
+          color="orange"
+        />
+        <MetricCard
+          title="Transport Cost"
+          value="₪19,000"
+          subtitle="Included in breakdown"
+          icon={Truck}
+          color="purple"
+        />
+      </div>
+
+      {/* Cost Distribution Chart Placeholder */}
+      <div className="bg-white p-6 rounded-lg border border-gray-200">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-gray-900">Cost Distribution</h3>
+          <BarChart3 size={20} className="text-gray-400" />
+        </div>
+        <div className="h-64 bg-gray-50 rounded-lg flex items-center justify-center">
+          <div className="text-center">
+            <BarChart3 size={48} className="text-gray-300 mx-auto mb-2" />
+            <p className="text-gray-500">Interactive cost breakdown chart</p>
+            <p className="text-sm text-gray-400">Chart visualization will be implemented here</p>
           </div>
         </div>
       </div>
 
-      <div className="p-6">
-        {/* Top Row: Project Selector + Key Metrics */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-6">
-          {/* Project Control Panel */}
-          <div className="lg:col-span-4">
-            <div className="bg-white rounded-lg shadow-sm border p-6">
-              <div className="flex items-center space-x-2 mb-4">
-                <MapPin size={20} className="text-eco-blue-600" />
-                <span className="font-semibold text-gray-900">Project Control</span>
-              </div>
-              
-              <select 
-                value={activeProject} 
-                onChange={(e) => setActiveProject(e.target.value)}
-                className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-eco-blue-500 focus:border-transparent mb-4"
-              >
-                <option value="">Select a project</option>
-                {projects.map(project => (
-                  <option key={project.name} value={project.name}>{project.name}</option>
-                ))}
-              </select>
+      {/* Materials Breakdown Table */}
+      <MaterialsBreakdownTable />
 
-              {currentProject && (
-                <div className="space-y-3">
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-gray-600">Status</span>
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                      currentProject.status === 'Active' ? 'bg-eco-green-100 text-eco-green-800' :
-                      currentProject.status === 'Planning' ? 'bg-yellow-100 text-yellow-800' :
-                      'bg-eco-blue-100 text-eco-blue-800'
-                    }`}>
-                      {currentProject.status}
-                    </span>
-                  </div>
-                  
-                  <div>
-                    <div className="flex justify-between items-center mb-1">
-                      <span className="text-sm text-gray-600">Progress</span>
-                      <span className="text-sm font-medium">{currentProject.progress}%</span>
-                    </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div 
-                        className="bg-eco-blue-600 h-2 rounded-full" 
-                        style={{ width: `${currentProject.progress}%` }}
-                      ></div>
-                    </div>
-                  </div>
-
-                  <div className="pt-2 border-t">
-                    <p className="text-sm text-gray-600">Type: <span className="font-medium">{currentProject.type}</span></p>
-                    <p className="text-sm text-gray-600">Location: <span className="font-medium">{currentProject.coordinates[0].toFixed(4)}, {currentProject.coordinates[1].toFixed(4)}</span></p>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Key Metrics */}
-          <div className="lg:col-span-8">
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="bg-white p-4 rounded-lg shadow-sm border">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-gray-600 text-xs">Total Cost</p>
-                    <p className="text-lg font-bold text-gray-900">₪{projectStats.totalCost.toLocaleString()}</p>
-                  </div>
-                  <div className="p-2 bg-eco-blue-100 rounded-full">
-                    <Calculator size={16} className="text-eco-blue-600" />
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-white p-4 rounded-lg shadow-sm border">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-gray-600 text-xs">Volume</p>
-                    <p className="text-lg font-bold text-gray-900">{projectStats.totalVolume}m³</p>
-                  </div>
-                  <div className="p-2 bg-eco-green-100 rounded-full">
-                    <Package size={16} className="text-eco-green-600" />
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-white p-4 rounded-lg shadow-sm border">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-gray-600 text-xs">Eco Score</p>
-                    <p className="text-lg font-bold text-eco-green-600">{projectStats.ecoScore}/10</p>
-                  </div>
-                  <div className="p-2 bg-eco-cyan-100 rounded-full">
-                    <BarChart3 size={16} className="text-eco-cyan-600" />
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-white p-4 rounded-lg shadow-sm border">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-gray-600 text-xs">Timeline</p>
-                    <p className="text-lg font-bold text-gray-900">{projectStats.timelineWeeks}w</p>
-                  </div>
-                  <div className="p-2 bg-purple-100 rounded-full">
-                    <Layers size={16} className="text-purple-600" />
-                  </div>
-                </div>
-              </div>
-            </div>
+      {/* Action Items */}
+      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+        <div className="flex items-start space-x-3">
+          <AlertCircle size={20} className="text-yellow-600 mt-0.5" />
+          <div>
+            <h4 className="font-medium text-yellow-800">Action Items</h4>
+            <ul className="mt-2 text-sm text-yellow-700 space-y-1">
+              <li>• Steel prices trending upward - consider early procurement</li>
+              <li>• Confirm delivery schedule with ECOncrete production team</li>
+              <li>• Site access requirements need verification for transport</li>
+            </ul>
           </div>
         </div>
-
-        {/* Main Dashboard Row */}
-        <div className={`grid gap-6 ${mapExpanded ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-3'}`}>
-          
-          {/* Map Panel */}
-          <div className={`${mapExpanded ? 'col-span-1' : 'lg:col-span-1'}`}>
-            <div className="bg-white rounded-lg shadow-sm border">
-              <div className="p-4 border-b flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <Map size={20} className="text-eco-blue-600" />
-                  <h3 className="font-semibold text-gray-900">Project Locations</h3>
-                </div>
-                <button 
-                  onClick={() => setMapExpanded(!mapExpanded)}
-                  className="p-1 hover:bg-gray-100 rounded"
-                >
-                  <Maximize2 size={16} className="text-gray-500" />
-                </button>
-              </div>
-              
-              <div className="p-2">
-                <SimpleMap 
-                  projects={projects} 
-                  activeProject={activeProject}
-                  expanded={mapExpanded}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Materials Table */}
-          <div className={`${mapExpanded ? 'hidden' : 'lg:col-span-2'}`}>
-            <div className="bg-white rounded-lg shadow-sm border">
-              <div className="p-4 border-b">
-                <h3 className="font-semibold text-gray-900">Bill of Materials</h3>
-                <p className="text-sm text-gray-600">Current project requirements</p>
-              </div>
-              
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="text-left p-3 font-medium text-gray-900">Material</th>
-                      <th className="text-right p-3 font-medium text-gray-900">Qty</th>
-                      <th className="text-right p-3 font-medium text-gray-900">Cost</th>
-                      <th className="text-center p-3 font-medium text-gray-900">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200">
-                    {materials.map((material) => (
-                      <tr 
-                        key={material.id} 
-                        className={`hover:bg-gray-50 cursor-pointer transition-colors ${
-                          selectedMaterial === material.id ? 'bg-eco-blue-50 border-l-4 border-eco-blue-500' : ''
-                        }`}
-                        onClick={() => setSelectedMaterial(material.id)}
-                      >
-                        <td className="p-3">
-                          <div className="flex items-center space-x-2">
-                            <div className={`w-2 h-2 rounded-full ${material.color}`}></div>
-                            <div>
-                              <p className="font-medium text-gray-900">{material.name}</p>
-                              <p className="text-xs text-gray-500">{material.category}</p>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="p-3 text-right font-medium">{material.quantity} {material.unit}</td>
-                        <td className="p-3 text-right font-medium">₪{(material.cost/1000).toFixed(0)}k</td>
-                        <td className="p-3 text-center">
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                            material.availability === 'In Stock' ? 'bg-eco-green-100 text-eco-green-800' :
-                            material.availability === 'Made to Order' ? 'bg-yellow-100 text-yellow-800' :
-                            'bg-red-100 text-red-800'
-                          }`}>
-                            {material.availability === 'In Stock' ? '✓' : 
-                             material.availability === 'Made to Order' ? '⏱' : '⚠'}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Material Detail Panel */}
-        {selectedMaterial && !mapExpanded && (
-          <div className="mt-6 bg-white rounded-lg shadow-sm border p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">
-              {materials.find(m => m.id === selectedMaterial)?.name} - Specifications
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="p-4 bg-eco-blue-50 rounded-lg">
-                <p className="text-sm text-eco-blue-600 font-medium">Technical Specs</p>
-                <p className="text-eco-blue-900 text-sm mt-1">Marine-grade, pH optimized for coral growth</p>
-              </div>
-              <div className="p-4 bg-eco-green-50 rounded-lg">
-                <p className="text-sm text-eco-green-600 font-medium">Ecological Impact</p>
-                <p className="text-eco-green-900 text-sm mt-1">Supports biodiversity, carbon sequestration</p>
-              </div>
-              <div className="p-4 bg-purple-50 rounded-lg">
-                <p className="text-sm text-purple-600 font-medium">Delivery</p>
-                <p className="text-purple-900 text-sm mt-1">2-3 weeks manufacturing + shipping</p>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

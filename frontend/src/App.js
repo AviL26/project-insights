@@ -1,40 +1,35 @@
 import React, { useState } from 'react';
 import { ProjectProvider } from './context/ProjectContext';
-import Navigation from './components/shared/Navigation';
-import MaterialsDashboard from './components/Materials/MaterialsDashboard';
 import ProjectSetupWizard from './components/ProjectSetup/ProjectSetupWizard';
-import ComplianceDashboard from './components/Compliance/ComplianceDashboard';
-import EcologicalDashboard from './components/Ecological/EcologicalDashboard';
+import IntegratedDashboard from './components/Dashboard/IntegratedDashboard';
 import './App.css';
 
 function App() {
   const [currentView, setCurrentView] = useState('setup');
+  const [activeTab, setActiveTab] = useState('materials');
 
   const handleProjectComplete = (projectData) => {
     console.log('Project created:', projectData);
-    setCurrentView('materials');
+    setCurrentView('dashboard');
+    setActiveTab('materials'); // Start with materials tab
   };
 
-  const renderCurrentView = () => {
-    switch (currentView) {
-      case 'setup':
-        return <ProjectSetupWizard onComplete={handleProjectComplete} />;
-      case 'materials':
-        return <MaterialsDashboard />;
-      case 'compliance':
-        return <ComplianceDashboard />;
-      case 'ecological':
-        return <EcologicalDashboard />;
-      default:
-        return <ProjectSetupWizard onComplete={handleProjectComplete} />;
-    }
+  const handleTabChange = (tab) => {
+    setActiveTab(tab);
   };
 
   return (
     <ProjectProvider>
       <div className="min-h-screen bg-gray-50">
-        <Navigation currentView={currentView} setCurrentView={setCurrentView} />
-        {renderCurrentView()}
+        {currentView === 'setup' ? (
+          <ProjectSetupWizard onComplete={handleProjectComplete} />
+        ) : (
+          <IntegratedDashboard 
+            activeTab={activeTab} 
+            onTabChange={handleTabChange}
+            onNewProject={() => setCurrentView('setup')}
+          />
+        )}
       </div>
     </ProjectProvider>
   );
