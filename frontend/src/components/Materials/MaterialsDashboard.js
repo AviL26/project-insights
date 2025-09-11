@@ -1,82 +1,17 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Calculator, Package, MapPin, Layers, Download, BarChart3, Map, Maximize2 } from 'lucide-react';
 import SimpleMap from '../shared/SimpleMap';
+import { materialsAPI, projectsAPI } from '../../services/api';
+import { useProject } from '../../context/ProjectContext';
 
 const MaterialsDashboard = () => {
-  const [activeProject, setActiveProject] = useState('Marina Breakwater - Tel Aviv');
+  const { state } = useProject();
+  const [activeProject, setActiveProject] = useState('');
   const [selectedMaterial, setSelectedMaterial] = useState('bio-enhanced-concrete');
   const [mapExpanded, setMapExpanded] = useState(false);
-
-  const projects = [
-    {
-      name: 'Marina Breakwater - Tel Aviv',
-      coordinates: [32.0853, 34.7818],
-      status: 'Active',
-      progress: 75,
-      type: 'Breakwater'
-    },
-    {
-      name: 'Coastal Protection - Haifa',
-      coordinates: [32.7940, 34.9896],
-      status: 'Planning',
-      progress: 25,
-      type: 'Seawall'
-    },
-    {
-      name: 'Port Expansion - Ashdod',
-      coordinates: [31.7940, 34.6336],
-      status: 'Approved',
-      progress: 40,
-      type: 'Port Infrastructure'
-    }
-  ];
-
-  const materials = [
-    {
-      id: 'bio-enhanced-concrete',
-      name: 'Bio-Enhanced Concrete',
-      category: 'Primary Structure',
-      quantity: 450,
-      unit: 'm³',
-      cost: 85000,
-      availability: 'In Stock',
-      ecological_benefit: 'High',
-      color: 'bg-eco-blue-500'
-    },
-    {
-      id: 'eco-armor-units',
-      name: 'ECO Armor Units',
-      category: 'Surface Enhancement',
-      quantity: 120,
-      unit: 'units',
-      cost: 24000,
-      availability: 'Made to Order',
-      ecological_benefit: 'Very High',
-      color: 'bg-eco-green-500'
-    },
-    {
-      id: 'bio-aggregate',
-      name: 'Bio-Aggregate Mix',
-      category: 'Additive',
-      quantity: 50,
-      unit: 'tons',
-      cost: 12000,
-      availability: 'In Stock',
-      ecological_benefit: 'Medium',
-      color: 'bg-eco-cyan-500'
-    },
-    {
-      id: 'calcium-carbonate',
-      name: 'Marine Calcium Carbonate',
-      category: 'Binding Agent',
-      quantity: 25,
-      unit: 'tons',
-      cost: 8500,
-      availability: 'Limited',
-      ecological_benefit: 'High',
-      color: 'bg-blue-500'
-    }
-  ];
+  const [materials, setMaterials] = useState([]);
+  const [projects, setProjects] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   const projectStats = {
     totalCost: 129500,
@@ -85,7 +20,64 @@ const MaterialsDashboard = () => {
     timelineWeeks: 12
   };
 
+  // Load projects from API
+  useEffect(() => {
+    const loadProjects = async () => {
+      try {
+        const response = await projectsAPI.getAll();
+        const apiProjects = response.data.map(project => ({
+          name: project.name,
+          coordinates: project.coordinates ? project.coordinates.split(',').map(coord => parseFloat(coord.trim())) : [32.0853, 34.7818],
+          status: project.permit_status === 'approved' ? 'Active' : 'Planning',
+          progress: 50,
+          type: project.structure_type || 'Unknown'
+        }));
+        setProjects(apiProjects);
+        
+        if (apiProjects.length > 0 && !activeProject) {
+          setActiveProject(apiProjects[0].name);
+        }
+      } catch (error) {
+        console.error('Failed to load projects:', error);
+      }
+    };
+
+    loadProjects();
+  }, []);
+
+  // Load materials data
+  useEffect(() => {
+    const loadMaterials = async () => {
+      try {
+        setLoading(true);
+        const response = await materialsAPI.getDemo();
+        setMaterials(response.data.map(material => ({
+          ...material,
+          color: `bg-eco-blue-500`
+        })));
+      } catch (error) {
+        console.error('Failed to load materials:', error);
+        setMaterials([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadMaterials();
+  }, []);
+
   const currentProject = projects.find(p => p.name === activeProject);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-eco-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading materials data...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -93,7 +85,7 @@ const MaterialsDashboard = () => {
       <div className="bg-gradient-to-r from-eco-blue-700 to-eco-blue-800 text-white p-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold mb-1">ECOncrete Command Center</h1>
+            <h1 className="text-2xl font-bold mb-1">Project Command Center</h1>
             <p className="text-eco-blue-100">Real-time project oversight and material management</p>
           </div>
           <div className="flex items-center space-x-4">
@@ -125,6 +117,7 @@ const MaterialsDashboard = () => {
                 onChange={(e) => setActiveProject(e.target.value)}
                 className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-eco-blue-500 focus:border-transparent mb-4"
               >
+                <option value="">Select a project</option>
                 {projects.map(project => (
                   <option key={project.name} value={project.name}>{project.name}</option>
                 ))}

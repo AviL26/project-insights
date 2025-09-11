@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useReducer } from 'react';
+import React, { createContext, useContext, useReducer, useEffect } from 'react';
+import { projectsAPI } from '../services/api';
 
 const ProjectContext = createContext();
 
@@ -15,6 +16,8 @@ const projectReducer = (state, action) => {
       return { ...state, isLoading: action.payload };
     case 'SET_ERROR':
       return { ...state, error: action.payload, isLoading: false };
+    case 'SET_PROJECTS':
+      return { ...state, projects: action.payload, isLoading: false };
     case 'ADD_PROJECT':
       return { 
         ...state, 
@@ -32,8 +35,43 @@ const projectReducer = (state, action) => {
 export const ProjectProvider = ({ children }) => {
   const [state, dispatch] = useReducer(projectReducer, initialState);
 
+  // Load projects on mount
+  useEffect(() => {
+    const loadProjects = async () => {
+      try {
+        dispatch({ type: 'SET_LOADING', payload: true });
+        const response = await projectsAPI.getAll();
+        dispatch({ type: 'SET_PROJECTS', payload: response.data });
+      } catch (error) {
+        dispatch({ type: 'SET_ERROR', payload: error.message });
+      }
+    };
+
+    loadProjects();
+  }, []);
+
+  const createProject = async (projectData) => {
+    try {
+      dispatch({ type: 'SET_LOADING', payload: true });
+      const response = await projectsAPI.create(projectData);
+      
+      // Fetch the created project details
+      const newProject = await projectsAPI.getById(response.data.id);
+      dispatch({ type: 'ADD_PROJECT', payload: newProject.data });
+      
+      return newProject.data;
+    } catch (error) {
+      dispatch({ type: 'SET_ERROR', payload: error.message });
+      throw error;
+    }
+  };
+
   return (
-    <ProjectContext.Provider value={{ state, dispatch }}>
+    <ProjectContext.Provider value={{ 
+      state, 
+      dispatch, 
+      createProject 
+    }}>
       {children}
     </ProjectContext.Provider>
   );
