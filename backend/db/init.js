@@ -76,6 +76,48 @@ db.serialize(() => {
     FOREIGN KEY (project_id) REFERENCES projects (id)
   )`);
 
+  // Add these new tables after the existing ones:
+
+// Permits table
+db.run(`CREATE TABLE IF NOT EXISTS permits (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER,
+  name TEXT NOT NULL,
+  status TEXT,
+  issue_date DATE,
+  expiry_date DATE,
+  authority TEXT,
+  conditions INTEGER DEFAULT 0,
+  FOREIGN KEY (project_id) REFERENCES projects (id)
+)`);
+
+// Species monitoring table  
+db.run(`CREATE TABLE IF NOT EXISTS species_monitoring (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER,
+  species_name TEXT,
+  scientific_name TEXT,
+  status TEXT,
+  population_trend TEXT,
+  confidence_level TEXT,
+  trend_percentage INTEGER,
+  recorded_date DATE DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (project_id) REFERENCES projects (id)
+)`);
+
+// Environmental metrics table (expand existing)
+db.run(`CREATE TABLE IF NOT EXISTS environmental_metrics (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER,
+  metric_name TEXT,
+  metric_value REAL,
+  unit TEXT,
+  status TEXT,
+  change_percentage TEXT,
+  recorded_date DATE DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (project_id) REFERENCES projects (id)
+)`);
+
   console.log('Database initialized successfully');
 });
 

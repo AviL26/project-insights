@@ -32,3 +32,28 @@ router.get('/demo', (req, res) => {
 });
 
 module.exports = router;
+
+// GET ecological data for a specific project
+router.get('/project/:projectId', (req, res) => {
+  const { projectId } = req.params;
+  
+  // Get species monitoring data
+  db.all('SELECT * FROM species_monitoring WHERE project_id = ? ORDER BY recorded_date DESC', [projectId], (err, species) => {
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+    
+    // Get environmental metrics
+    db.all('SELECT * FROM environmental_metrics WHERE project_id = ? ORDER BY recorded_date DESC', [projectId], (err2, metrics) => {
+      if (err2) {
+        return res.status(500).json({ error: err2.message });
+      }
+      
+      res.json({
+        species,
+        metrics,
+        projectId
+      });
+    });
+  });
+});
