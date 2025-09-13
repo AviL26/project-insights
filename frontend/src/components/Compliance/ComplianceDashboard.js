@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Shield, AlertTriangle, CheckCircle, Clock, FileText, Users, Calendar, ExternalLink } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Shield, AlertTriangle, Clock, FileText, Users, Calendar, ExternalLink } from 'lucide-react';
 import { complianceAPI, projectsAPI } from '../../services/api';
 
 const ComplianceDashboard = () => {
@@ -12,6 +12,33 @@ const ComplianceDashboard = () => {
     deadlines: [] 
   });
   const [loading, setLoading] = useState(true);
+
+  // Load compliance data for selected project
+  const loadComplianceData = useCallback(async (projectId) => {
+    try {
+      setLoading(true);
+      const response = await complianceAPI.getByProject(projectId);
+      setComplianceData(response.data);
+    } catch (error) {
+      console.error('Failed to load compliance data for project:', error);
+      // Fallback to demo data
+      loadDemoData();
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Load demo data as fallback
+  const loadDemoData = useCallback(async () => {
+    try {
+      const response = await complianceAPI.getDemo();
+      setComplianceData(response.data);
+    } catch (error) {
+      console.error('Failed to load demo data:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   // Load projects on component mount
   useEffect(() => {
@@ -32,34 +59,7 @@ const ComplianceDashboard = () => {
       }
     };
     loadProjects();
-  }, []);
-
-  // Load compliance data for selected project
-  const loadComplianceData = async (projectId) => {
-    try {
-      setLoading(true);
-      const response = await complianceAPI.getByProject(projectId);
-      setComplianceData(response.data);
-    } catch (error) {
-      console.error('Failed to load compliance data for project:', error);
-      // Fallback to demo data
-      loadDemoData();
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Load demo data as fallback
-  const loadDemoData = async () => {
-    try {
-      const response = await complianceAPI.getDemo();
-      setComplianceData(response.data);
-    } catch (error) {
-      console.error('Failed to load demo data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [loadComplianceData, loadDemoData]);
 
   // Handle project selection change
   const handleProjectChange = (projectName) => {

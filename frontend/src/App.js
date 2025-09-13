@@ -4,11 +4,12 @@ import { ProjectProvider } from './context/ProjectContext';
 import ProjectsLandingPage from './components/ProjectsLandingPage';
 import MaterialsDashboard from './components/Materials/MaterialsDashboard';
 import EcologicalDashboard from './components/Ecological/EcologicalDashboard';
+import ComplianceDashboard from './components/Compliance/ComplianceDashboard'; // Add this import
 import ProjectSetupWizard from './components/ProjectSetup/ProjectSetupWizard';
-import { Home, ArrowLeft, Building2, Leaf, X } from 'lucide-react';
+import { Home, ArrowLeft, Building2, Leaf, Shield, X } from 'lucide-react'; // Add Shield icon
 
 function App() {
-  const [currentView, setCurrentView] = useState('landing'); // 'landing', 'materials', 'ecological'
+  const [currentView, setCurrentView] = useState('landing'); // 'landing', 'materials', 'ecological', 'compliance'
   const [showWizardModal, setShowWizardModal] = useState(false);
   const [selectedProject, setSelectedProject] = useState(null);
 
@@ -50,7 +51,7 @@ function App() {
     </header>
   );
 
-  // Simple Sidebar Component (embedded)
+  // Simple Sidebar Component (embedded) - Updated with Compliance
   const SimpleSidebar = () => (
     <div className="w-64 bg-white shadow-lg border-r border-gray-200 flex flex-col">
       {/* Project Info */}
@@ -102,6 +103,22 @@ function App() {
             <div>
               <div className="font-medium">Ecological Impact</div>
               <div className="text-xs text-gray-500">Ocean conditions and monitoring</div>
+            </div>
+          </button>
+
+          {/* Add Compliance Navigation Button */}
+          <button
+            onClick={() => handleViewChange('compliance')}
+            className={`w-full flex items-center space-x-3 px-3 py-3 rounded-lg text-left transition-colors ${
+              currentView === 'compliance'
+                ? 'bg-yellow-50 text-yellow-700 border border-yellow-200'
+                : 'text-gray-700 hover:bg-gray-50'
+            }`}
+          >
+            <Shield size={18} />
+            <div>
+              <div className="font-medium">Compliance</div>
+              <div className="text-xs text-gray-500">Regulatory frameworks and permits</div>
             </div>
           </button>
         </nav>
@@ -173,6 +190,15 @@ function App() {
     );
   };
 
+  const getCurrentViewTitle = () => {
+    switch (currentView) {
+      case 'materials': return 'Materials Analysis';
+      case 'ecological': return 'Ecological Impact';
+      case 'compliance': return 'Compliance Dashboard';
+      default: return 'Dashboard';
+    }
+  };
+
   return (
     <ProjectProvider>
       <div className="App">
@@ -205,7 +231,7 @@ function App() {
                     <span className="text-gray-600">{selectedProject?.projectName || selectedProject?.name || 'Project'}</span>
                     <span className="text-gray-400">/</span>
                     <span className="font-medium text-gray-900">
-                      {currentView === 'materials' ? 'Materials Analysis' : 'Ecological Impact'}
+                      {getCurrentViewTitle()}
                     </span>
                   </div>
                   
@@ -230,6 +256,17 @@ function App() {
                     >
                       Ecological
                     </button>
+                    {/* Add Compliance Header Button */}
+                    <button
+                      onClick={() => handleViewChange('compliance')}
+                      className={`px-3 py-1 rounded-lg text-sm transition-colors ${
+                        currentView === 'compliance'
+                          ? 'bg-yellow-100 text-yellow-700'
+                          : 'text-gray-600 hover:bg-gray-100'
+                      }`}
+                    >
+                      Compliance
+                    </button>
                     
                     <button
                       onClick={handleCreateNewProject}
@@ -245,6 +282,7 @@ function App() {
               <main className="flex-1 overflow-auto bg-gray-50">
                 {currentView === 'materials' && <MaterialsDashboard />}
                 {currentView === 'ecological' && <EcologicalDashboard />}
+                {currentView === 'compliance' && <ComplianceDashboard />}
               </main>
             </div>
           </div>

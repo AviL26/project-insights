@@ -4,18 +4,23 @@ import { useProject } from '../context/ProjectContext';
 import { 
   Plus, Search, Filter, MapPin, Calendar, Waves, Leaf, 
   MoreVertical, Edit3, Trash2, Eye, ArrowRight, Building2,
-  Clock, TrendingUp, AlertCircle, CheckCircle
+  Clock, TrendingUp, AlertCircle, CheckCircle, X
 } from 'lucide-react';
 
 const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
-  const { state, dispatch, deleteProject } = useProject();
+  const { state, dispatch, deleteProject, bulkDeleteProjects } = useProject();
   const { projects, currentProject } = state;
   
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('all');
   const [sortBy, setSortBy] = useState('recent');
-  const [viewMode, setViewMode] = useState('grid'); // 'grid' or 'list'
+  const [viewMode, setViewMode] = useState('grid');
   const [deletingProjectId, setDeletingProjectId] = useState(null);
+  
+  // Multi-select state
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedProjects, setSelectedProjects] = useState(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   // Mock project status for demonstration
   const getProjectStatus = (project) => {
@@ -47,9 +52,9 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
   const enhancedProjects = projects.map(project => ({
     ...project,
     status: getProjectStatus(project),
-    lastModified: new Date(project.updatedAt || Date.now() - Math.random() * 30 * 24 * 60 * 60 * 1000),
+    lastModified: new Date(project.updated_at || Date.now() - Math.random() * 30 * 24 * 60 * 60 * 1000),
     progress: Math.floor(Math.random() * 100),
-    type: project.structureType || project.type || 'Marine Infrastructure',
+    type: project.structure_type || project.type || 'Marine Infrastructure',
     location: project.region ? 
       `${project.region}, ${project.country}` : 
       project.location || 
@@ -59,7 +64,7 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
   // Filter and sort projects
   const filteredProjects = enhancedProjects
     .filter(project => {
-      const matchesSearch = (project.projectName || project.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      const matchesSearch = (project.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
                            (project.description || '').toLowerCase().includes(searchTerm.toLowerCase());
       const matchesFilter = filterType === 'all' || project.status === filterType;
       return matchesSearch && matchesFilter;
@@ -67,7 +72,7 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
     .sort((a, b) => {
       switch (sortBy) {
         case 'name':
-          return (a.projectName || a.name || '').localeCompare(b.projectName || b.name || '');
+          return (a.name || '').localeCompare(b.name || '');
         case 'recent':
           return new Date(b.lastModified) - new Date(a.lastModified);
         case 'progress':
@@ -77,7 +82,33 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
       }
     });
 
+  // Selection handlers
+  const toggleSelectionMode = () => {
+    setSelectionMode(!selectionMode);
+    setSelectedProjects(new Set());
+  };
+
+  const toggleProjectSelection = (projectId, e) => {
+    e.stopPropagation();
+    const newSelected = new Set(selectedProjects);
+    if (newSelected.has(projectId)) {
+      newSelected.delete(projectId);
+    } else {
+      newSelected.add(projectId);
+    }
+    setSelectedProjects(newSelected);
+  };
+
+  const selectAllProjects = () => {
+    if (selectedProjects.size === filteredProjects.length) {
+      setSelectedProjects(new Set());
+    } else {
+      setSelectedProjects(new Set(filteredProjects.map(p => p.id)));
+    }
+  };
+
   const handleSelectProject = (project) => {
+    if (selectionMode) return; // Don't navigate in selection mode
     dispatch({ type: 'SET_CURRENT_PROJECT', payload: project });
     onNavigateToProject?.(project);
   };
@@ -85,7 +116,7 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
   const handleDeleteProject = async (project, e) => {
     e.stopPropagation();
     
-    const projectName = project.projectName || project.name || 'this project';
+    const projectName = project.name || 'this project';
     const confirmMessage = `Are you sure you want to delete "${projectName}"?\n\nThis will permanently remove:\n• All project data and settings\n• Materials analysis data\n• Ecological monitoring data\n\nThis action cannot be undone.`;
     
     if (window.confirm(confirmMessage)) {
@@ -103,9 +134,38 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
     }
   };
 
+  const handleBulkDelete = async () => {
+    if (selectedProjects.size === 0) return;
+
+    const selectedProjectsArray = Array.from(selectedProjects);
+    const selectedProjectNames = filteredProjects
+      .filter(p => selectedProjects.has(p.id))
+      .map(p => p.name || `Project ${p.id}`)
+      .join('", "');
+
+    const confirmMessage = `Are you sure you want to delete ${selectedProjects.size} project${selectedProjects.size === 1 ? '' : 's'}?\n\nProjects to delete: "${selectedProjectNames}"\n\nThis will permanently remove:\n• All project data and settings\n• Materials analysis data\n• Ecological monitoring data\n\nThis action cannot be undone.`;
+    
+    if (window.confirm(confirmMessage)) {
+      setBulkDeleting(true);
+      
+      try {
+        const result = await bulkDeleteProjects(selectedProjectsArray);
+        console.log(`Bulk delete successful: ${result.deletedCount} projects deleted`);
+        
+        // Reset selection state
+        setSelectedProjects(new Set());
+        setSelectionMode(false);
+      } catch (error) {
+        console.error('Error in bulk delete:', error);
+        alert('Failed to delete projects. Please try again.');
+      } finally {
+        setBulkDeleting(false);
+      }
+    }
+  };
+
   const handleEditProject = (project, e) => {
     e.stopPropagation();
-    // TODO: Implement edit functionality
     console.log('Edit project:', project);
     alert('Edit functionality coming soon!');
   };
@@ -130,13 +190,35 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
                 Manage and monitor your marine infrastructure projects
               </p>
             </div>
-            <button
-              onClick={onCreateNewProject}
-              className="flex items-center space-x-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
-            >
-              <Plus size={20} />
-              <span>New Project</span>
-            </button>
+            
+            <div className="flex items-center space-x-3">
+              {/* Selection Mode Toggle */}
+              <button
+                onClick={toggleSelectionMode}
+                className={`px-4 py-2 rounded-lg border transition-colors ${
+                  selectionMode 
+                    ? 'bg-blue-600 text-white border-blue-600' 
+                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                }`}
+              >
+                {selectionMode ? (
+                  <div className="flex items-center space-x-2">
+                    <X size={16} />
+                    <span>Cancel</span>
+                  </div>
+                ) : (
+                  'Select'
+                )}
+              </button>
+              
+              <button
+                onClick={onCreateNewProject}
+                className="flex items-center space-x-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
+              >
+                <Plus size={20} />
+                <span>New Project</span>
+              </button>
+            </div>
           </div>
           
           {/* Stats */}
@@ -162,6 +244,47 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
           </div>
         </div>
       </div>
+
+      {/* Selection Controls */}
+      {selectionMode && (
+        <div className="bg-blue-50 border-b border-blue-200">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-4">
+                <button
+                  onClick={selectAllProjects}
+                  className="text-sm text-blue-600 hover:text-blue-800"
+                >
+                  {selectedProjects.size === filteredProjects.length ? 'Deselect All' : 'Select All'}
+                </button>
+                <span className="text-sm text-gray-600">
+                  {selectedProjects.size} of {filteredProjects.length} projects selected
+                </span>
+              </div>
+              
+              {selectedProjects.size > 0 && (
+                <button
+                  onClick={handleBulkDelete}
+                  disabled={bulkDeleting}
+                  className="flex items-center space-x-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {bulkDeleting ? (
+                    <>
+                      <div className="w-4 h-4 border border-white border-t-transparent rounded-full animate-spin" />
+                      <span>Deleting...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 size={16} />
+                      <span>Delete Selected ({selectedProjects.size})</span>
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Controls */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -192,7 +315,7 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
             </select>
           </div>
 
-          {/* Sort and View */}
+          {/* Sort */}
           <div className="flex items-center space-x-4">
             <select
               value={sortBy}
@@ -236,16 +359,30 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
             {filteredProjects.map((project) => (
               <div
                 key={project.id}
-                className="bg-white rounded-lg shadow-sm border hover:shadow-md transition-shadow cursor-pointer group"
-                onClick={() => handleSelectProject(project)}
+                className={`bg-white rounded-lg shadow-sm border hover:shadow-md transition-all cursor-pointer group relative ${
+                  selectedProjects.has(project.id) ? 'ring-2 ring-blue-500 bg-blue-50' : ''
+                } ${selectionMode ? 'hover:ring-2 hover:ring-blue-300' : ''}`}
+                onClick={() => selectionMode ? toggleProjectSelection(project.id, { stopPropagation: () => {} }) : handleSelectProject(project)}
               >
+                {/* Selection Checkbox */}
+                {selectionMode && (
+                  <div className="absolute top-4 left-4 z-10">
+                    <input
+                      type="checkbox"
+                      checked={selectedProjects.has(project.id)}
+                      onChange={(e) => toggleProjectSelection(project.id, e)}
+                      className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500 focus:ring-2"
+                    />
+                  </div>
+                )}
+
                 {/* Project Header */}
-                <div className="p-6">
+                <div className={`p-6 ${selectionMode ? 'pl-12' : ''}`}>
                   <div className="flex items-start justify-between mb-4">
                     <div className="flex-1">
                       <div className="flex items-center space-x-2 mb-2">
                         <h3 className="text-lg font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">
-                          {project.projectName || project.name}
+                          {project.name || `Project ${project.id}`}
                         </h3>
                         {currentProject?.id === project.id && (
                           <span className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded-full">
@@ -261,14 +398,16 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
                       </div>
                     </div>
                     
-                    <div className="relative">
-                      <button 
-                        className="p-2 hover:bg-gray-100 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <MoreVertical size={16} className="text-gray-400" />
-                      </button>
-                    </div>
+                    {!selectionMode && (
+                      <div className="relative">
+                        <button 
+                          className="p-2 hover:bg-gray-100 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <MoreVertical size={16} className="text-gray-400" />
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   {/* Project Details */}
@@ -304,60 +443,62 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
                   </div>
 
                   {/* Quick Actions */}
-                  <div className="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between">
-                    <div className="flex items-center space-x-4">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleSelectProject(project);
-                        }}
-                        className="flex items-center space-x-1 text-sm text-blue-600 hover:text-blue-700"
-                      >
-                        <Waves size={14} />
-                        <span>Ocean Data</span>
-                      </button>
-                      
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleSelectProject(project);
-                        }}
-                        className="flex items-center space-x-1 text-sm text-green-600 hover:text-green-700"
-                      >
-                        <Leaf size={14} />
-                        <span>Ecological</span>
-                      </button>
-                    </div>
+                  {!selectionMode && (
+                    <div className="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between">
+                      <div className="flex items-center space-x-4">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleSelectProject(project);
+                          }}
+                          className="flex items-center space-x-1 text-sm text-blue-600 hover:text-blue-700"
+                        >
+                          <Waves size={14} />
+                          <span>Ocean Data</span>
+                        </button>
+                        
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleSelectProject(project);
+                          }}
+                          className="flex items-center space-x-1 text-sm text-green-600 hover:text-green-700"
+                        >
+                          <Leaf size={14} />
+                          <span>Ecological</span>
+                        </button>
+                      </div>
 
-                    <div className="flex items-center space-x-2">
-                      <button
-                        onClick={(e) => handleEditProject(project, e)}
-                        className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
-                        title="Edit project"
-                      >
-                        <Edit3 size={14} />
-                      </button>
-                      
-                      <button
-                        onClick={(e) => handleDeleteProject(project, e)}
-                        disabled={deletingProjectId === project.id}
-                        className={`p-1 transition-colors ${
-                          deletingProjectId === project.id 
-                            ? 'text-gray-400 cursor-not-allowed' 
-                            : 'text-gray-400 hover:text-red-500'
-                        }`}
-                        title="Delete project"
-                      >
-                        {deletingProjectId === project.id ? (
-                          <div className="w-3.5 h-3.5 border border-gray-300 border-t-transparent rounded-full animate-spin" />
-                        ) : (
-                          <Trash2 size={14} />
-                        )}
-                      </button>
-                      
-                      <ArrowRight size={16} className="text-gray-400 group-hover:text-blue-600 transition-colors" />
+                      <div className="flex items-center space-x-2">
+                        <button
+                          onClick={(e) => handleEditProject(project, e)}
+                          className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
+                          title="Edit project"
+                        >
+                          <Edit3 size={14} />
+                        </button>
+                        
+                        <button
+                          onClick={(e) => handleDeleteProject(project, e)}
+                          disabled={deletingProjectId === project.id}
+                          className={`p-1 transition-colors ${
+                            deletingProjectId === project.id 
+                              ? 'text-gray-400 cursor-not-allowed' 
+                              : 'text-gray-400 hover:text-red-500'
+                          }`}
+                          title="Delete project"
+                        >
+                          {deletingProjectId === project.id ? (
+                            <div className="w-3.5 h-3.5 border border-gray-300 border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            <Trash2 size={14} />
+                          )}
+                        </button>
+                        
+                        <ArrowRight size={16} className="text-gray-400 group-hover:text-blue-600 transition-colors" />
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               </div>
             ))}
