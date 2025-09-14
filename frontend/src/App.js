@@ -1,10 +1,11 @@
-// src/App.js - Complete Updated Version with Error Boundaries
+// src/App.js - Updated with Enhanced Compliance Dashboard
 import React, { useState } from 'react';
 import { ProjectProvider } from './context/ProjectContext';
+import { ComplianceProvider } from './context/ComplianceContext';
 import ProjectsLandingPage from './components/ProjectsLandingPage';
 import MaterialsDashboard from './components/Materials/MaterialsDashboard';
 import EcologicalDashboard from './components/Ecological/EcologicalDashboard';
-import ComplianceDashboard from './components/Compliance/ComplianceDashboard';
+import ComplianceDashboard from './components/ComplianceDashboard/ComplianceDashboard';
 import ProjectSetupWizard from './components/ProjectSetup/ProjectSetupWizard';
 import ErrorBoundary from './components/ErrorBoundary';
 import { Home, ArrowLeft, Building2, Leaf, Shield, X } from 'lucide-react';
@@ -120,7 +121,7 @@ function App() {
             <Shield size={18} />
             <div>
               <div className="font-medium">Compliance</div>
-              <div className="text-xs text-gray-500">Regulatory frameworks and permits</div>
+              <div className="text-xs text-gray-500">Enhanced regulatory analysis</div>
             </div>
           </button>
         </nav>
@@ -210,105 +211,107 @@ function App() {
 
   return (
     <ErrorBoundary>
-      <ProjectProvider>
-        <div className="App">
-          {currentView === 'landing' ? (
-            // Landing Page View with Error Boundary
-            <ErrorBoundary>
-              <ProjectsLandingPage
-                onNavigateToProject={handleNavigateToProject}
-                onCreateNewProject={handleCreateNewProject}
-              />
-            </ErrorBoundary>
-          ) : (
-            // Dashboard Views with Navigation
-            <div className="flex h-screen bg-gray-100">
-              {/* Sidebar */}
+      <ComplianceProvider>
+        <ProjectProvider>
+          <div className="App">
+            {currentView === 'landing' ? (
+              // Landing Page View with Error Boundary
               <ErrorBoundary>
-                <SimpleSidebar />
+                <ProjectsLandingPage
+                  onNavigateToProject={handleNavigateToProject}
+                  onCreateNewProject={handleCreateNewProject}
+                />
               </ErrorBoundary>
-              
-              {/* Main Content */}
-              <div className="flex-1 flex flex-col overflow-hidden">
-                {/* Header */}
-                <SimpleHeader>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-4">
-                      <button
-                        onClick={handleBackToLanding}
-                        className="flex items-center space-x-2 px-3 py-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
-                      >
-                        <ArrowLeft size={16} />
-                        <span>Projects</span>
-                      </button>
-                      <span className="text-gray-400">/</span>
-                      <span className="text-gray-600">
-                        {selectedProject?.projectName || selectedProject?.name || 'Project'}
-                      </span>
-                      <span className="text-gray-400">/</span>
-                      <span className="font-medium text-gray-900">
-                        {getCurrentViewTitle()}
-                      </span>
-                    </div>
-                    
-                    <div className="flex items-center space-x-2">
-                      <button
-                        onClick={() => handleViewChange('materials')}
-                        className={`px-3 py-1 rounded-lg text-sm transition-colors ${
-                          currentView === 'materials'
-                            ? 'bg-blue-100 text-blue-700'
-                            : 'text-gray-600 hover:bg-gray-100'
-                        }`}
-                      >
-                        Materials
-                      </button>
-                      <button
-                        onClick={() => handleViewChange('ecological')}
-                        className={`px-3 py-1 rounded-lg text-sm transition-colors ${
-                          currentView === 'ecological'
-                            ? 'bg-green-100 text-green-700'
-                            : 'text-gray-600 hover:bg-gray-100'
-                        }`}
-                      >
-                        Ecological
-                      </button>
-                      <button
-                        onClick={() => handleViewChange('compliance')}
-                        className={`px-3 py-1 rounded-lg text-sm transition-colors ${
-                          currentView === 'compliance'
-                            ? 'bg-yellow-100 text-yellow-700'
-                            : 'text-gray-600 hover:bg-gray-100'
-                        }`}
-                      >
-                        Compliance
-                      </button>
-                      
-                      <button
-                        onClick={handleCreateNewProject}
-                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm ml-2"
-                      >
-                        New Project
-                      </button>
-                    </div>
-                  </div>
-                </SimpleHeader>
+            ) : (
+              // Dashboard Views with Navigation
+              <div className="flex h-screen bg-gray-100">
+                {/* Sidebar */}
+                <ErrorBoundary>
+                  <SimpleSidebar />
+                </ErrorBoundary>
                 
-                {/* Dashboard Content with Error Boundaries */}
-                <main className="flex-1 overflow-auto bg-gray-50">
-                  <ErrorBoundary>
-                    {currentView === 'materials' && <MaterialsDashboard />}
-                    {currentView === 'ecological' && <EcologicalDashboard />}
-                    {currentView === 'compliance' && <ComplianceDashboard />}
-                  </ErrorBoundary>
-                </main>
+                {/* Main Content */}
+                <div className="flex-1 flex flex-col overflow-hidden">
+                  {/* Header */}
+                  <SimpleHeader>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-4">
+                        <button
+                          onClick={handleBackToLanding}
+                          className="flex items-center space-x-2 px-3 py-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+                        >
+                          <ArrowLeft size={16} />
+                          <span>Projects</span>
+                        </button>
+                        <span className="text-gray-400">/</span>
+                        <span className="text-gray-600">
+                          {selectedProject?.projectName || selectedProject?.name || 'Project'}
+                        </span>
+                        <span className="text-gray-400">/</span>
+                        <span className="font-medium text-gray-900">
+                          {getCurrentViewTitle()}
+                        </span>
+                      </div>
+                      
+                      <div className="flex items-center space-x-2">
+                        <button
+                          onClick={() => handleViewChange('materials')}
+                          className={`px-3 py-1 rounded-lg text-sm transition-colors ${
+                            currentView === 'materials'
+                              ? 'bg-blue-100 text-blue-700'
+                              : 'text-gray-600 hover:bg-gray-100'
+                          }`}
+                        >
+                          Materials
+                        </button>
+                        <button
+                          onClick={() => handleViewChange('ecological')}
+                          className={`px-3 py-1 rounded-lg text-sm transition-colors ${
+                            currentView === 'ecological'
+                              ? 'bg-green-100 text-green-700'
+                              : 'text-gray-600 hover:bg-gray-100'
+                          }`}
+                        >
+                          Ecological
+                        </button>
+                        <button
+                          onClick={() => handleViewChange('compliance')}
+                          className={`px-3 py-1 rounded-lg text-sm transition-colors ${
+                            currentView === 'compliance'
+                              ? 'bg-yellow-100 text-yellow-700'
+                              : 'text-gray-600 hover:bg-gray-100'
+                          }`}
+                        >
+                          Compliance
+                        </button>
+                        
+                        <button
+                          onClick={handleCreateNewProject}
+                          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm ml-2"
+                        >
+                          New Project
+                        </button>
+                      </div>
+                    </div>
+                  </SimpleHeader>
+                  
+                  {/* Dashboard Content with Error Boundaries */}
+                  <main className="flex-1 overflow-auto bg-gray-50">
+                    <ErrorBoundary>
+                      {currentView === 'materials' && <MaterialsDashboard />}
+                      {currentView === 'ecological' && <EcologicalDashboard />}
+                      {currentView === 'compliance' && <ComplianceDashboard />}
+                    </ErrorBoundary>
+                  </main>
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Wizard Modal Overlay */}
-          <WizardModal />
-        </div>
-      </ProjectProvider>
+            {/* Wizard Modal Overlay */}
+            <WizardModal />
+          </div>
+        </ProjectProvider>
+      </ComplianceProvider>
     </ErrorBoundary>
   );
 }

@@ -1,0 +1,385 @@
+// frontend/src/components/ComplianceDashboard/ComplianceDashboard.js
+import React, { useState, useEffect } from 'react';
+import { useProject } from '../../context/ProjectContext';
+import { useCompliance } from '../../context/ComplianceContext';
+import ComplianceMap from './ComplianceMap';
+import ComplianceChecklist from './ComplianceChecklist';
+import RiskSummaryCards from './RiskSummaryCards';
+import ProjectSelector from './ProjectSelector';
+import { 
+  Shield, 
+  AlertTriangle, 
+  Clock, 
+  FileText, 
+  Download, 
+  RefreshCw,
+  MapPin,
+  Wifi,
+  WifiOff
+} from 'lucide-react';
+
+const ComplianceDashboard = () => {
+  const { state: projectState } = useProject();
+  const { 
+    isLoading, 
+    error, 
+    currentAnalysis, 
+    enhancedFeaturesAvailable,
+    checkSystemStatus,
+    checkCompliance,
+    clearError,
+    formatLocation
+  } = useCompliance();
+
+  const [selectedProject, setSelectedProject] = useState(null);
+  const [manualCoordinates, setManualCoordinates] = useState({ lat: '', lon: '' });
+  const [projectType, setProjectType] = useState('breakwater');
+  const [analysisMode, setAnalysisMode] = useState('project'); // 'project' or 'manual'
+
+  // Check system status on mount
+  useEffect(() => {
+    checkSystemStatus().catch(console.error);
+  }, [checkSystemStatus]);
+
+  // Auto-select first project if available
+  useEffect(() => {
+    if (!selectedProject && projectState.activeProjects?.length > 0) {
+      setSelectedProject(projectState.activeProjects[0]);
+    }
+  }, [projectState.activeProjects, selectedProject]);
+
+  // Auto-analyze when project is selected
+  useEffect(() => {
+    if (selectedProject && analysisMode === 'project') {
+      handleAnalyzeProject(selectedProject);
+    }
+  }, [selectedProject, analysisMode]);
+
+  const handleAnalyzeProject = async (project) => {
+    if (!project?.lat || !project?.lon || !project?.structure_type) {
+      return;
+    }
+
+    try {
+      await checkCompliance({
+        lat: project.lat,
+        lon: project.lon,
+        projectType: project.structure_type,
+        projectId: project.id
+      });
+    } catch (error) {
+      console.error('Failed to analyze project compliance:', error);
+    }
+  };
+
+  const handleManualAnalysis = async () => {
+    const lat = parseFloat(manualCoordinates.lat);
+    const lon = parseFloat(manualCoordinates.lon);
+
+    if (isNaN(lat) || isNaN(lon)) {
+      alert('Please enter valid coordinates');
+      return;
+    }
+
+    if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+      alert('Please enter valid coordinate ranges (lat: -90 to 90, lon: -180 to 180)');
+      return;
+    }
+
+    try {
+      await checkCompliance({
+        lat,
+        lon,
+        projectType,
+        projectId: null
+      });
+    } catch (error) {
+      console.error('Failed to analyze manual coordinates:', error);
+    }
+  };
+
+  const refreshAnalysis = () => {
+    if (analysisMode === 'project' && selectedProject) {
+      handleAnalyzeProject(selectedProject);
+    } else if (analysisMode === 'manual') {
+      handleManualAnalysis();
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <div className="bg-gradient-to-r from-yellow-600 to-yellow-700 text-white p-6">
+        <div className="max-w-7xl mx-auto">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold mb-2">Compliance Command Center</h1>
+              <p className="text-yellow-100">Regulatory oversight and risk management</p>
+              
+              {/* System Status Indicator */}
+              <div className="flex items-center space-x-4 mt-3">
+                <div className="flex items-center space-x-2">
+                  {enhancedFeaturesAvailable ? (
+                    <>
+                      <Wifi size={16} className="text-green-300" />
+                      <span className="text-sm text-green-200">Enhanced Features Active</span>
+                    </>
+                  ) : (
+                    <>
+                      <WifiOff size={16} className="text-orange-300" />
+                      <span className="text-sm text-orange-200">Basic Mode</span>
+                    </>
+                  )}
+                </div>
+                
+                {currentAnalysis && (
+                  <div className="flex items-center space-x-2">
+                    <MapPin size={16} className="text-yellow-200" />
+                    <span className="text-sm text-yellow-200">
+                      {formatLocation(currentAnalysis.location)}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            <div className="flex items-center space-x-4">
+              <button
+                onClick={refreshAnalysis}
+                disabled={isLoading}
+                className="flex items-center space-x-2 px-4 py-2 bg-yellow-800 text-white rounded-lg hover:bg-yellow-900 disabled:opacity-50 transition-colors"
+              >
+                <RefreshCw size={16} className={isLoading ? 'animate-spin' : ''} />
+                <span>Refresh</span>
+              </button>
+              
+              <button 
+                className="flex items-center space-x-2 px-4 py-2 bg-white text-yellow-700 rounded-lg hover:bg-gray-100 font-medium transition-colors"
+                disabled={!currentAnalysis}
+              >
+                <Download size={16} />
+                <span>Export Report</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Error Display */}
+      {error && (
+        <div className="bg-red-50 border-l-4 border-red-400 p-4">
+          <div className="flex">
+            <AlertTriangle className="h-5 w-5 text-red-400" />
+            <div className="ml-3">
+              <p className="text-sm text-red-700">{error}</p>
+              <button
+                onClick={clearError}
+                className="text-sm text-red-600 underline hover:text-red-500 mt-1"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="max-w-7xl mx-auto p-6">
+        {/* Analysis Mode Toggle */}
+        <div className="mb-6 bg-white p-4 rounded-lg shadow-sm border">
+          <div className="flex items-center space-x-6">
+            <label className="flex items-center space-x-2">
+              <input
+                type="radio"
+                name="analysisMode"
+                value="project"
+                checked={analysisMode === 'project'}
+                onChange={(e) => setAnalysisMode(e.target.value)}
+                className="text-yellow-600"
+              />
+              <span className="font-medium">Analyze Existing Project</span>
+            </label>
+            
+            <label className="flex items-center space-x-2">
+              <input
+                type="radio"
+                name="analysisMode"
+                value="manual"
+                checked={analysisMode === 'manual'}
+                onChange={(e) => setAnalysisMode(e.target.value)}
+                className="text-yellow-600"
+              />
+              <span className="font-medium">Manual Coordinates</span>
+            </label>
+          </div>
+
+          {/* Project Selection Mode */}
+          {analysisMode === 'project' && (
+            <div className="mt-4">
+              <ProjectSelector
+                projects={projectState.activeProjects || []}
+                selectedProject={selectedProject}
+                onSelectProject={setSelectedProject}
+                isLoading={projectState.isLoading}
+              />
+            </div>
+          )}
+
+          {/* Manual Coordinates Mode */}
+          {analysisMode === 'manual' && (
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Latitude
+                </label>
+                <input
+                  type="number"
+                  step="any"
+                  placeholder="32.0853"
+                  value={manualCoordinates.lat}
+                  onChange={(e) => setManualCoordinates(prev => ({ ...prev, lat: e.target.value }))}
+                  className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Longitude
+                </label>
+                <input
+                  type="number"
+                  step="any"
+                  placeholder="34.7818"
+                  value={manualCoordinates.lon}
+                  onChange={(e) => setManualCoordinates(prev => ({ ...prev, lon: e.target.value }))}
+                  className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Project Type
+                </label>
+                <select
+                  value={projectType}
+                  onChange={(e) => setProjectType(e.target.value)}
+                  className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
+                >
+                  <option value="breakwater">Breakwater</option>
+                  <option value="seawall">Seawall</option>
+                  <option value="pier">Pier</option>
+                </select>
+              </div>
+              
+              <div>
+                <button
+                  onClick={handleManualAnalysis}
+                  disabled={isLoading || !manualCoordinates.lat || !manualCoordinates.lon}
+                  className="w-full px-4 py-2 bg-yellow-600 text-white rounded-md hover:bg-yellow-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  Analyze
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Loading State */}
+        {isLoading && (
+          <div className="flex items-center justify-center py-12">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-yellow-600"></div>
+            <span className="ml-3 text-gray-600">Analyzing compliance requirements...</span>
+          </div>
+        )}
+
+        {/* Analysis Results */}
+        {currentAnalysis && !isLoading && (
+          <>
+            {/* Risk Summary Cards */}
+            <RiskSummaryCards 
+              riskSummary={currentAnalysis.riskSummary}
+              location={currentAnalysis.location}
+              recommendations={currentAnalysis.recommendations}
+            />
+
+            {/* Main Content Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
+              {/* Map and Checklist */}
+              <div className="lg:col-span-2 space-y-6">
+                <ComplianceMap 
+                  location={currentAnalysis.location}
+                  rules={currentAnalysis.rules}
+                />
+                
+                <ComplianceChecklist 
+                  rules={currentAnalysis.rules}
+                  deadlines={currentAnalysis.deadlines}
+                />
+              </div>
+
+              {/* Sidebar */}
+              <div className="space-y-6">
+                {/* Project Info */}
+                {selectedProject && analysisMode === 'project' && (
+                  <div className="bg-white rounded-lg shadow-sm border p-4">
+                    <h3 className="font-semibold text-gray-900 mb-3">Project Details</h3>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Name:</span>
+                        <span className="font-medium">{selectedProject.name}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Type:</span>
+                        <span className="font-medium">{selectedProject.structure_type}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Location:</span>
+                        <span className="font-medium">{selectedProject.country}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Quick Actions */}
+                <div className="bg-white rounded-lg shadow-sm border p-4">
+                  <h3 className="font-semibold text-gray-900 mb-3">Quick Actions</h3>
+                  <div className="space-y-2">
+                    <button className="w-full text-left p-2 hover:bg-gray-50 rounded text-sm flex items-center space-x-2">
+                      <FileText size={16} className="text-gray-400" />
+                      <span>Download compliance checklist</span>
+                    </button>
+                    <button className="w-full text-left p-2 hover:bg-gray-50 rounded text-sm flex items-center space-x-2">
+                      <Clock size={16} className="text-gray-400" />
+                      <span>Set deadline reminders</span>
+                    </button>
+                    <button className="w-full text-left p-2 hover:bg-gray-50 rounded text-sm flex items-center space-x-2">
+                      <Shield size={16} className="text-gray-400" />
+                      <span>Request regulatory consultation</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Empty State */}
+        {!currentAnalysis && !isLoading && (
+          <div className="text-center py-12">
+            <Shield size={48} className="mx-auto text-gray-300 mb-4" />
+            <h3 className="text-lg font-semibold text-gray-600 mb-2">
+              Ready for Compliance Analysis
+            </h3>
+            <p className="text-gray-500">
+              {analysisMode === 'project' 
+                ? 'Select a project above to begin compliance analysis'
+                : 'Enter coordinates above to analyze compliance requirements'
+              }
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default ComplianceDashboard;

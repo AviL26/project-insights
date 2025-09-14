@@ -1,7 +1,7 @@
-// frontend/src/services/api.js - Updated with Archive System
+// frontend/src/services/api.js - Updated with compliance endpoints
 import axios from 'axios';
 
-const API_BASE = 'http://localhost:5000/api';
+const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:5000/api';
 
 // Create axios instance with common config
 const api = axios.create({
@@ -9,55 +9,40 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  timeout: 10000, // 10 second timeout
 });
 
-// Projects API with archive functionality
-export const projectsAPI = {
-  // Get projects by status (active or archived)
-  getAll: (status = 'active') => api.get(`/projects?status=${status}`),
-  
-  // Get projects by specific status with detailed response
-  getByStatus: (status) => api.get(`/projects/by-status/${status}`),
-  
-  // Get single project
-  getById: (id) => api.get(`/projects/${id}`),
-  
-  // Create new project (always active)
-  create: (projectData) => api.post('/projects', projectData),
-  
-  // Update project
-  update: (id, projectData) => api.put(`/projects/${id}`, projectData),
-  
-  // Archive single project
-  archive: (id) => api.put(`/projects/${id}/archive`),
-  
-  // Restore project from archive
-  restore: (id) => api.put(`/projects/${id}/restore`),
-  
-  // Bulk archive projects
-  bulkArchive: (projectIds) => api.put('/projects/bulk-archive', { projectIds }),
-  
-  // Permanently delete single project (HARD DELETE)
-  deletePermanent: (id) => api.delete(`/projects/${id}/permanent`),
-  
-  // Bulk permanent delete (HARD DELETE)
-  bulkDeletePermanent: (projectIds) => api.delete('/projects/bulk-permanent', { data: { projectIds } }),
+// Request interceptor for logging
+api.interceptors.request.use((config) => {
+  if (process.env.NODE_ENV === 'development') {
+    console.log(`API Request: ${config.method?.toUpperCase()} ${config.url}`);
+  }
+  return config;
+});
 
-  // Legacy methods for backward compatibility
-  delete: (id) => projectsAPI.archive(id), // Map old delete to archive
-  bulkDelete: (projectIds) => projectsAPI.bulkArchive(projectIds), // Map old bulk delete to bulk archive
+// Response interceptor for error handling
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    console.error('API Error:', error.response?.data || error.message);
+    return Promise.reject(error);
+  }
+);
+
+// Health check
+export const healthAPI = {
+  check: () => api.get('/health'),
+  databaseStatus: () => api.get('/database/status')
 };
 
-// Materials API (unchanged)
-export const materialsAPI = {
-  getAll: () => api.get('/materials'),
-  getByProject: (projectId) => api.get(`/materials/project/${projectId}`),
-  create: (materialData) => api.post('/materials', materialData),
-  update: (id, materialData) => api.put(`/materials/${id}`, materialData),
-  delete: (id) => api.delete(`/materials/${id}`),
+// Enhanced compliance API (PostgreSQL)
+export const complianceEnhancedAPI = {
+  check: (params) => api.post('/compliance-enhanced/check', params),
+  getRules: (params) => api.get('/compliance-enhanced/rules', { params }),
+  getStatus: () => api.get('/compliance-enhanced/status')
 };
 
-// Compliance API (unchanged)
+// Legacy compliance API (SQLite) - for backward compatibility
 export const complianceAPI = {
   getAll: () => api.get('/compliance'),
   getByProject: (projectId) => api.get(`/compliance/project/${projectId}`),
@@ -67,7 +52,30 @@ export const complianceAPI = {
   delete: (id) => api.delete(`/compliance/${id}`),
 };
 
-// Ecological API (unchanged)
+// Projects API (existing)
+export const projectsAPI = {
+  getAll: (status = 'active') => api.get(`/projects?status=${status}`),
+  getByStatus: (status) => api.get(`/projects/by-status/${status}`),
+  getById: (id) => api.get(`/projects/${id}`),
+  create: (projectData) => api.post('/projects', projectData),
+  update: (id, projectData) => api.put(`/projects/${id}`, projectData),
+  archive: (id) => api.put(`/projects/${id}/archive`),
+  restore: (id) => api.put(`/projects/${id}/restore`),
+  bulkArchive: (projectIds) => api.put('/projects/bulk-archive', { projectIds }),
+  deletePermanent: (id) => api.delete(`/projects/${id}/permanent`),
+  bulkDeletePermanent: (projectIds) => api.delete('/projects/bulk-permanent', { data: { projectIds } }),
+};
+
+// Materials API (existing)
+export const materialsAPI = {
+  getAll: () => api.get('/materials'),
+  getByProject: (projectId) => api.get(`/materials/project/${projectId}`),
+  create: (materialData) => api.post('/materials', materialData),
+  update: (id, materialData) => api.put(`/materials/${id}`, materialData),
+  delete: (id) => api.delete(`/materials/${id}`),
+};
+
+// Ecological API (existing)
 export const ecologicalAPI = {
   getAll: () => api.get('/ecological'),
   getByProject: (projectId) => api.get(`/ecological/project/${projectId}`),
