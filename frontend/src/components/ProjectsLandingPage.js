@@ -1,57 +1,41 @@
-// src/components/ProjectsLandingPage.js
-import React, { useState, useEffect } from 'react';
+// src/components/ProjectsLandingPage.js - Updated with Archive System
+import React, { useState } from 'react';
 import { useProject } from '../context/ProjectContext';
 import { 
   Plus, Search, Filter, MapPin, Calendar, Waves, Leaf, 
   MoreVertical, Edit3, Trash2, Eye, ArrowRight, Building2,
-  Clock, TrendingUp, AlertCircle, CheckCircle, X
+  Clock, TrendingUp, AlertCircle, CheckCircle, X, Archive,
+  ArchiveRestore, AlertTriangle as Warning
 } from 'lucide-react';
 
 const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
-  const { state, dispatch, deleteProject, bulkDeleteProjects } = useProject();
-  const { projects, currentProject } = state;
+  const { 
+    state, 
+    getCurrentProjects, 
+    setCurrentView, 
+    archiveProject, 
+    restoreProject,
+    deleteProjectPermanent, 
+    bulkArchiveProjects, 
+    bulkDeletePermanent 
+  } = useProject();
   
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('all');
   const [sortBy, setSortBy] = useState('recent');
-  const [viewMode, setViewMode] = useState('grid');
   const [deletingProjectId, setDeletingProjectId] = useState(null);
   
   // Multi-select state
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedProjects, setSelectedProjects] = useState(new Set());
-  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkActionLoading, setBulkActionLoading] = useState(false);
 
-  // Mock project status for demonstration
-  const getProjectStatus = (project) => {
-    const statuses = ['active', 'planning', 'completed', 'on-hold'];
-    return statuses[Math.floor(Math.random() * statuses.length)];
-  };
-
-  const getStatusIcon = (status) => {
-    switch (status) {
-      case 'active': return <TrendingUp className="text-green-500" size={16} />;
-      case 'planning': return <Clock className="text-blue-500" size={16} />;
-      case 'completed': return <CheckCircle className="text-gray-500" size={16} />;
-      case 'on-hold': return <AlertCircle className="text-orange-500" size={16} />;
-      default: return <Building2 className="text-gray-400" size={16} />;
-    }
-  };
-
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'active': return 'bg-green-100 text-green-800';
-      case 'planning': return 'bg-blue-100 text-blue-800';
-      case 'completed': return 'bg-gray-100 text-gray-800';
-      case 'on-hold': return 'bg-orange-100 text-orange-800';
-      default: return 'bg-gray-100 text-gray-600';
-    }
-  };
+  const currentProjects = getCurrentProjects();
+  const isArchivedView = state.currentView === 'archived';
 
   // Enhanced project data with additional metadata
-  const enhancedProjects = projects.map(project => ({
+  const enhancedProjects = currentProjects.map(project => ({
     ...project,
-    status: getProjectStatus(project),
     lastModified: new Date(project.updated_at || Date.now() - Math.random() * 30 * 24 * 60 * 60 * 1000),
     progress: Math.floor(Math.random() * 100),
     type: project.structure_type || project.type || 'Marine Infrastructure',
@@ -66,7 +50,7 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
     .filter(project => {
       const matchesSearch = (project.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
                            (project.description || '').toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesFilter = filterType === 'all' || project.status === filterType;
+      const matchesFilter = filterType === 'all' || project.type?.toLowerCase().includes(filterType.toLowerCase());
       return matchesSearch && matchesFilter;
     })
     .sort((a, b) => {
@@ -108,33 +92,71 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
   };
 
   const handleSelectProject = (project) => {
-    if (selectionMode) return; // Don't navigate in selection mode
-    dispatch({ type: 'SET_CURRENT_PROJECT', payload: project });
+    if (selectionMode) return;
     onNavigateToProject?.(project);
   };
 
-  const handleDeleteProject = async (project, e) => {
+  const handleArchiveProject = async (project, e) => {
     e.stopPropagation();
     
     const projectName = project.name || 'this project';
-    const confirmMessage = `Are you sure you want to delete "${projectName}"?\n\nThis will permanently remove:\n• All project data and settings\n• Materials analysis data\n• Ecological monitoring data\n\nThis action cannot be undone.`;
-    
-    if (window.confirm(confirmMessage)) {
+    if (window.confirm(`Archive "${projectName}"?\n\nThe project will be moved to the Archive folder and can be restored later.`)) {
       setDeletingProjectId(project.id);
       
       try {
-        await deleteProject(project.id);
-        console.log(`Project "${projectName}" deleted successfully`);
+        await archiveProject(project.id);
+        console.log(`Project "${projectName}" archived successfully`);
       } catch (error) {
-        console.error('Error deleting project:', error);
-        alert('Failed to delete project. Please try again.');
+        console.error('Error archiving project:', error);
+        alert('Failed to archive project. Please try again.');
       } finally {
         setDeletingProjectId(null);
       }
     }
   };
 
-  const handleBulkDelete = async () => {
+  const handleRestoreProject = async (project, e) => {
+    e.stopPropagation();
+    
+    const projectName = project.name || 'this project';
+    if (window.confirm(`Restore "${projectName}" from archive?\n\nThe project will be moved back to active projects.`)) {
+      setDeletingProjectId(project.id);
+      
+      try {
+        await restoreProject(project.id);
+        console.log(`Project "${projectName}" restored successfully`);
+      } catch (error) {
+        console.error('Error restoring project:', error);
+        alert('Failed to restore project. Please try again.');
+      } finally {
+        setDeletingProjectId(null);
+      }
+    }
+  };
+
+  const handleDeletePermanent = async (project, e) => {
+    e.stopPropagation();
+    
+    const projectName = project.name || 'this project';
+    const confirmMessage = `⚠️ PERMANENTLY DELETE "${projectName}"?\n\nThis will PERMANENTLY remove:\n• All project data and settings\n• Materials analysis data\n• Ecological monitoring data\n• Compliance records\n\n❌ THIS CANNOT BE UNDONE!\n\nType "DELETE" to confirm:`;
+    
+    const userInput = prompt(confirmMessage);
+    if (userInput === 'DELETE') {
+      setDeletingProjectId(project.id);
+      
+      try {
+        await deleteProjectPermanent(project.id);
+        console.log(`Project "${projectName}" permanently deleted`);
+      } catch (error) {
+        console.error('Error permanently deleting project:', error);
+        alert('Failed to permanently delete project. Please try again.');
+      } finally {
+        setDeletingProjectId(null);
+      }
+    }
+  };
+
+  const handleBulkArchive = async () => {
     if (selectedProjects.size === 0) return;
 
     const selectedProjectsArray = Array.from(selectedProjects);
@@ -143,31 +165,50 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
       .map(p => p.name || `Project ${p.id}`)
       .join('", "');
 
-    const confirmMessage = `Are you sure you want to delete ${selectedProjects.size} project${selectedProjects.size === 1 ? '' : 's'}?\n\nProjects to delete: "${selectedProjectNames}"\n\nThis will permanently remove:\n• All project data and settings\n• Materials analysis data\n• Ecological monitoring data\n\nThis action cannot be undone.`;
-    
-    if (window.confirm(confirmMessage)) {
-      setBulkDeleting(true);
+    if (window.confirm(`Archive ${selectedProjects.size} project${selectedProjects.size === 1 ? '' : 's'}?\n\nProjects: "${selectedProjectNames}"\n\nThese projects will be moved to Archive and can be restored later.`)) {
+      setBulkActionLoading(true);
       
       try {
-        const result = await bulkDeleteProjects(selectedProjectsArray);
-        console.log(`Bulk delete successful: ${result.deletedCount} projects deleted`);
-        
-        // Reset selection state
+        const result = await bulkArchiveProjects(selectedProjectsArray);
+        console.log(`Bulk archive successful: ${result.archivedCount} projects archived`);
         setSelectedProjects(new Set());
         setSelectionMode(false);
       } catch (error) {
-        console.error('Error in bulk delete:', error);
-        alert('Failed to delete projects. Please try again.');
+        console.error('Error in bulk archive:', error);
+        alert('Failed to archive projects. Please try again.');
       } finally {
-        setBulkDeleting(false);
+        setBulkActionLoading(false);
       }
     }
   };
 
-  const handleEditProject = (project, e) => {
-    e.stopPropagation();
-    console.log('Edit project:', project);
-    alert('Edit functionality coming soon!');
+  const handleBulkDeletePermanent = async () => {
+    if (selectedProjects.size === 0) return;
+
+    const selectedProjectsArray = Array.from(selectedProjects);
+    const selectedProjectNames = filteredProjects
+      .filter(p => selectedProjects.has(p.id))
+      .map(p => p.name || `Project ${p.id}`)
+      .join('", "');
+
+    const confirmMessage = `⚠️ PERMANENTLY DELETE ${selectedProjects.size} project${selectedProjects.size === 1 ? '' : 's'}?\n\nProjects: "${selectedProjectNames}"\n\n❌ THIS CANNOT BE UNDONE!\n\nType "DELETE" to confirm:`;
+    
+    const userInput = prompt(confirmMessage);
+    if (userInput === 'DELETE') {
+      setBulkActionLoading(true);
+      
+      try {
+        const result = await bulkDeletePermanent(selectedProjectsArray);
+        console.log(`Bulk permanent delete successful: ${result.deletedCount} projects deleted`);
+        setSelectedProjects(new Set());
+        setSelectionMode(false);
+      } catch (error) {
+        console.error('Error in bulk permanent delete:', error);
+        alert('Failed to permanently delete projects. Please try again.');
+      } finally {
+        setBulkActionLoading(false);
+      }
+    }
   };
 
   const formatDate = (date) => {
@@ -192,25 +233,6 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
             </div>
             
             <div className="flex items-center space-x-3">
-              {/* Selection Mode Toggle */}
-              <button
-                onClick={toggleSelectionMode}
-                className={`px-4 py-2 rounded-lg border transition-colors ${
-                  selectionMode 
-                    ? 'bg-blue-600 text-white border-blue-600' 
-                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                }`}
-              >
-                {selectionMode ? (
-                  <div className="flex items-center space-x-2">
-                    <X size={16} />
-                    <span>Cancel</span>
-                  </div>
-                ) : (
-                  'Select'
-                )}
-              </button>
-              
               <button
                 onClick={onCreateNewProject}
                 className="flex items-center space-x-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
@@ -221,39 +243,65 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
             </div>
           </div>
           
-          {/* Stats */}
-          <div className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
-            {[
-              { label: 'Total Projects', value: projects.length, icon: Building2, color: 'blue' },
-              { label: 'Active', value: enhancedProjects.filter(p => p.status === 'active').length, icon: TrendingUp, color: 'green' },
-              { label: 'In Planning', value: enhancedProjects.filter(p => p.status === 'planning').length, icon: Clock, color: 'blue' },
-              { label: 'Completed', value: enhancedProjects.filter(p => p.status === 'completed').length, icon: CheckCircle, color: 'gray' }
-            ].map((stat, index) => (
-              <div key={index} className="bg-white rounded-lg p-4 border">
-                <div className="flex items-center space-x-3">
-                  <div className={`p-2 rounded-lg bg-${stat.color}-100`}>
-                    <stat.icon size={20} className={`text-${stat.color}-600`} />
-                  </div>
-                  <div>
-                    <p className="text-2xl font-semibold text-gray-900">{stat.value}</p>
-                    <p className="text-sm text-gray-600">{stat.label}</p>
+          {/* View Tabs */}
+          <div className="mt-6 flex items-center space-x-1 bg-gray-100 p-1 rounded-lg w-fit">
+            <button
+              onClick={() => setCurrentView('active')}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                !isArchivedView 
+                  ? 'bg-white text-gray-900 shadow-sm' 
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              Active Projects ({state.activeProjects.length})
+            </button>
+            <button
+              onClick={() => setCurrentView('archived')}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                isArchivedView 
+                  ? 'bg-white text-gray-900 shadow-sm' 
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              Archived Projects ({state.archivedProjects.length})
+            </button>
+          </div>
+
+          {/* Stats - only show for active view */}
+          {!isArchivedView && (
+            <div className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
+              {[
+                { label: 'Active Projects', value: state.activeProjects.length, icon: Building2, color: 'blue' },
+                { label: 'In Progress', value: Math.floor(state.activeProjects.length * 0.7), icon: TrendingUp, color: 'green' },
+                { label: 'Planning', value: Math.floor(state.activeProjects.length * 0.2), icon: Clock, color: 'yellow' },
+                { label: 'Archived', value: state.archivedProjects.length, icon: Archive, color: 'gray' }
+              ].map((stat, index) => (
+                <div key={index} className="bg-white rounded-lg p-4 border">
+                  <div className="flex items-center space-x-3">
+                    <div className={`p-2 rounded-lg bg-${stat.color}-100`}>
+                      <stat.icon size={20} className={`text-${stat.color}-600`} />
+                    </div>
+                    <div>
+                      <p className="text-2xl font-semibold text-gray-900">{stat.value}</p>
+                      <p className="text-sm text-gray-600">{stat.label}</p>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
       {/* Selection Controls */}
       {selectionMode && (
-        <div className="bg-blue-50 border-b border-blue-200">
+        <div className={`${isArchivedView ? 'bg-orange-50 border-orange-200' : 'bg-blue-50 border-blue-200'} border-b`}>
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-4">
                 <button
                   onClick={selectAllProjects}
-                  className="text-sm text-blue-600 hover:text-blue-800"
+                  className={`text-sm ${isArchivedView ? 'text-orange-600 hover:text-orange-800' : 'text-blue-600 hover:text-blue-800'}`}
                 >
                   {selectedProjects.size === filteredProjects.length ? 'Deselect All' : 'Select All'}
                 </button>
@@ -263,23 +311,35 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
               </div>
               
               {selectedProjects.size > 0 && (
-                <button
-                  onClick={handleBulkDelete}
-                  disabled={bulkDeleting}
-                  className="flex items-center space-x-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {bulkDeleting ? (
-                    <>
-                      <div className="w-4 h-4 border border-white border-t-transparent rounded-full animate-spin" />
-                      <span>Deleting...</span>
-                    </>
+                <div className="flex items-center space-x-2">
+                  {!isArchivedView ? (
+                    <button
+                      onClick={handleBulkArchive}
+                      disabled={bulkActionLoading}
+                      className="flex items-center space-x-2 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {bulkActionLoading ? (
+                        <div className="w-4 h-4 border border-white border-t-transparent rounded-full animate-spin" />
+                      ) : (
+                        <Archive size={16} />
+                      )}
+                      <span>Archive Selected ({selectedProjects.size})</span>
+                    </button>
                   ) : (
-                    <>
-                      <Trash2 size={16} />
-                      <span>Delete Selected ({selectedProjects.size})</span>
-                    </>
+                    <button
+                      onClick={handleBulkDeletePermanent}
+                      disabled={bulkActionLoading}
+                      className="flex items-center space-x-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {bulkActionLoading ? (
+                        <div className="w-4 h-4 border border-white border-t-transparent rounded-full animate-spin" />
+                      ) : (
+                        <Warning size={16} />
+                      )}
+                      <span>Delete Permanently ({selectedProjects.size})</span>
+                    </button>
                   )}
-                </button>
+                </div>
               )}
             </div>
           </div>
@@ -289,7 +349,6 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
       {/* Controls */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between space-y-4 md:space-y-0">
-          {/* Search and Filter */}
           <div className="flex items-center space-x-4">
             <div className="relative">
               <Search size={18} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
@@ -307,15 +366,13 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
               onChange={(e) => setFilterType(e.target.value)}
               className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             >
-              <option value="all">All Status</option>
-              <option value="active">Active</option>
-              <option value="planning">Planning</option>
-              <option value="completed">Completed</option>
-              <option value="on-hold">On Hold</option>
+              <option value="all">All Types</option>
+              <option value="breakwater">Breakwater</option>
+              <option value="pier">Pier</option>
+              <option value="jetty">Jetty</option>
             </select>
           </div>
 
-          {/* Sort */}
           <div className="flex items-center space-x-4">
             <select
               value={sortBy}
@@ -326,6 +383,17 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
               <option value="name">Name (A-Z)</option>
               <option value="progress">Progress</option>
             </select>
+
+            <button
+              onClick={toggleSelectionMode}
+              className={`px-4 py-2 rounded-lg border transition-colors ${
+                selectionMode 
+                  ? 'bg-gray-600 text-white border-gray-600' 
+                  : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+              }`}
+            >
+              {selectionMode ? 'Cancel' : 'Select'}
+            </button>
           </div>
         </div>
       </div>
@@ -334,17 +402,20 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-8">
         {filteredProjects.length === 0 ? (
           <div className="text-center py-12">
-            <Building2 size={48} className="mx-auto text-gray-300 mb-4" />
+            {isArchivedView ? <Archive size={48} className="mx-auto text-gray-300 mb-4" /> : <Building2 size={48} className="mx-auto text-gray-300 mb-4" />}
             <h3 className="text-lg font-semibold text-gray-600 mb-2">
-              {searchTerm || filterType !== 'all' ? 'No projects found' : 'No projects yet'}
+              {searchTerm || filterType !== 'all' ? 'No projects found' : 
+               isArchivedView ? 'No archived projects' : 'No active projects yet'}
             </h3>
             <p className="text-gray-500 mb-6">
               {searchTerm || filterType !== 'all' 
                 ? 'Try adjusting your search or filter criteria'
-                : 'Create your first project to get started with environmental monitoring'
+                : isArchivedView 
+                  ? 'Archived projects will appear here when you archive active projects'
+                  : 'Create your first project to get started'
               }
             </p>
-            {!searchTerm && filterType === 'all' && (
+            {!searchTerm && filterType === 'all' && !isArchivedView && (
               <button
                 onClick={onCreateNewProject}
                 className="inline-flex items-center space-x-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
@@ -376,38 +447,25 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
                   </div>
                 )}
 
+                {/* Archive Status Badge */}
+                {isArchivedView && (
+                  <div className="absolute top-4 right-4 z-10">
+                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-700">
+                      <Archive size={12} className="mr-1" />
+                      Archived
+                    </span>
+                  </div>
+                )}
+
                 {/* Project Header */}
                 <div className={`p-6 ${selectionMode ? 'pl-12' : ''}`}>
                   <div className="flex items-start justify-between mb-4">
                     <div className="flex-1">
-                      <div className="flex items-center space-x-2 mb-2">
-                        <h3 className="text-lg font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">
-                          {project.name || `Project ${project.id}`}
-                        </h3>
-                        {currentProject?.id === project.id && (
-                          <span className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded-full">
-                            Current
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        {getStatusIcon(project.status)}
-                        <span className={`px-2 py-1 text-xs rounded-full ${getStatusColor(project.status)}`}>
-                          {project.status.charAt(0).toUpperCase() + project.status.slice(1)}
-                        </span>
-                      </div>
+                      <h3 className="text-lg font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">
+                        {project.name || `Project ${project.id}`}
+                      </h3>
+                      <p className="text-sm text-gray-600 mt-1">{project.type}</p>
                     </div>
-                    
-                    {!selectionMode && (
-                      <div className="relative">
-                        <button 
-                          className="p-2 hover:bg-gray-100 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <MoreVertical size={16} className="text-gray-400" />
-                        </button>
-                      </div>
-                    )}
                   </div>
 
                   {/* Project Details */}
@@ -418,84 +476,109 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
                     </div>
                     
                     <div className="flex items-center space-x-2 text-sm text-gray-600">
-                      <Building2 size={14} />
-                      <span>{project.type}</span>
-                    </div>
-                    
-                    <div className="flex items-center space-x-2 text-sm text-gray-600">
                       <Calendar size={14} />
                       <span>Modified {formatDate(project.lastModified)}</span>
                     </div>
                   </div>
 
-                  {/* Progress Bar */}
-                  <div className="mt-4">
-                    <div className="flex items-center justify-between text-sm mb-2">
-                      <span className="text-gray-600">Progress</span>
-                      <span className="text-gray-900 font-medium">{project.progress}%</span>
+                  {/* Progress Bar - only for active projects */}
+                  {!isArchivedView && (
+                    <div className="mt-4">
+                      <div className="flex items-center justify-between text-sm mb-2">
+                        <span className="text-gray-600">Progress</span>
+                        <span className="text-gray-900 font-medium">{project.progress}%</span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div 
+                          className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                          style={{ width: `${project.progress}%` }}
+                        />
+                      </div>
                     </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div 
-                        className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                        style={{ width: `${project.progress}%` }}
-                      />
-                    </div>
-                  </div>
+                  )}
 
-                  {/* Quick Actions */}
+                  {/* Actions */}
                   {!selectionMode && (
                     <div className="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between">
-                      <div className="flex items-center space-x-4">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleSelectProject(project);
-                          }}
-                          className="flex items-center space-x-1 text-sm text-blue-600 hover:text-blue-700"
-                        >
-                          <Waves size={14} />
-                          <span>Ocean Data</span>
-                        </button>
-                        
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleSelectProject(project);
-                          }}
-                          className="flex items-center space-x-1 text-sm text-green-600 hover:text-green-700"
-                        >
-                          <Leaf size={14} />
-                          <span>Ecological</span>
-                        </button>
-                      </div>
+                      {isArchivedView ? (
+                        // Archived project actions
+                        <div className="flex items-center space-x-4">
+                          <button
+                            onClick={(e) => handleRestoreProject(project, e)}
+                            disabled={deletingProjectId === project.id}
+                            className="flex items-center space-x-1 text-sm text-green-600 hover:text-green-700 disabled:opacity-50"
+                          >
+                            <ArchiveRestore size={14} />
+                            <span>Restore</span>
+                          </button>
+                        </div>
+                      ) : (
+                        // Active project actions
+                        <div className="flex items-center space-x-4">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSelectProject(project);
+                            }}
+                            className="flex items-center space-x-1 text-sm text-blue-600 hover:text-blue-700"
+                          >
+                            <Waves size={14} />
+                            <span>Ocean Data</span>
+                          </button>
+                          
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSelectProject(project);
+                            }}
+                            className="flex items-center space-x-1 text-sm text-green-600 hover:text-green-700"
+                          >
+                            <Leaf size={14} />
+                            <span>Ecological</span>
+                          </button>
+                        </div>
+                      )}
 
                       <div className="flex items-center space-x-2">
-                        <button
-                          onClick={(e) => handleEditProject(project, e)}
-                          className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
-                          title="Edit project"
-                        >
-                          <Edit3 size={14} />
-                        </button>
+                        {isArchivedView ? (
+                          <button
+                            onClick={(e) => handleDeletePermanent(project, e)}
+                            disabled={deletingProjectId === project.id}
+                            className={`p-1 transition-colors ${
+                              deletingProjectId === project.id 
+                                ? 'text-gray-400 cursor-not-allowed' 
+                                : 'text-gray-400 hover:text-red-500'
+                            }`}
+                            title="Delete permanently"
+                          >
+                            {deletingProjectId === project.id ? (
+                              <div className="w-3.5 h-3.5 border border-gray-300 border-t-transparent rounded-full animate-spin" />
+                            ) : (
+                              <Trash2 size={14} />
+                            )}
+                          </button>
+                        ) : (
+                          <button
+                            onClick={(e) => handleArchiveProject(project, e)}
+                            disabled={deletingProjectId === project.id}
+                            className={`p-1 transition-colors ${
+                              deletingProjectId === project.id 
+                                ? 'text-gray-400 cursor-not-allowed' 
+                                : 'text-gray-400 hover:text-orange-500'
+                            }`}
+                            title="Archive project"
+                          >
+                            {deletingProjectId === project.id ? (
+                              <div className="w-3.5 h-3.5 border border-gray-300 border-t-transparent rounded-full animate-spin" />
+                            ) : (
+                              <Archive size={14} />
+                            )}
+                          </button>
+                        )}
                         
-                        <button
-                          onClick={(e) => handleDeleteProject(project, e)}
-                          disabled={deletingProjectId === project.id}
-                          className={`p-1 transition-colors ${
-                            deletingProjectId === project.id 
-                              ? 'text-gray-400 cursor-not-allowed' 
-                              : 'text-gray-400 hover:text-red-500'
-                          }`}
-                          title="Delete project"
-                        >
-                          {deletingProjectId === project.id ? (
-                            <div className="w-3.5 h-3.5 border border-gray-300 border-t-transparent rounded-full animate-spin" />
-                          ) : (
-                            <Trash2 size={14} />
-                          )}
-                        </button>
-                        
-                        <ArrowRight size={16} className="text-gray-400 group-hover:text-blue-600 transition-colors" />
+                        <ArrowRight size={16} className={`transition-colors ${
+                          isArchivedView ? 'text-gray-300' : 'text-gray-400 group-hover:text-blue-600'
+                        }`} />
                       </div>
                     </div>
                   )}

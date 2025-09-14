@@ -1,11 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Shield, AlertTriangle, Clock, FileText, Users, Calendar, ExternalLink } from 'lucide-react';
-import { complianceAPI, projectsAPI } from '../../services/api';
+import { complianceAPI } from '../../services/api';
+import { useProject } from '../../context/ProjectContext';
 
 const ComplianceDashboard = () => {
+  const { state } = useProject();
+  const { projects, currentProject } = state;
+  
   const [selectedFramework, setSelectedFramework] = useState('all');
-  const [selectedProject, setSelectedProject] = useState('');
-  const [projects, setProjects] = useState([]);
+  const [selectedProjectName, setSelectedProjectName] = useState('');
   const [complianceData, setComplianceData] = useState({ 
     frameworks: [], 
     permits: [], 
@@ -13,12 +16,103 @@ const ComplianceDashboard = () => {
   });
   const [loading, setLoading] = useState(true);
 
+  // Load demo data as fallback
+  const loadDemoData = useCallback(async () => {
+    try {
+      const response = await complianceAPI.getDemo();
+      // Handle different response formats
+      const data = response.data?.data || response.data || {
+        frameworks: [
+          {
+            id: 'eu-eia',
+            name: 'EU Environmental Impact Assessment',
+            status: 'in-progress',
+            last_review: '2025-08-15',
+            next_review: '2025-10-15',
+            requirements: 12,
+            completed: 8,
+            risk_level: 'medium'
+          },
+          {
+            id: 'marine-framework',
+            name: 'Marine Strategy Framework Directive',
+            status: 'pending',
+            last_review: '2025-07-20',
+            next_review: '2025-11-01',
+            requirements: 8,
+            completed: 3,
+            risk_level: 'high'
+          },
+          {
+            id: 'local-coastal',
+            name: 'Local Coastal Management Plan',
+            status: 'compliant',
+            last_review: '2025-09-01',
+            next_review: '2025-12-01',
+            requirements: 6,
+            completed: 6,
+            risk_level: 'low'
+          }
+        ],
+        permits: [
+          {
+            id: 'marine-permit',
+            name: 'Marine Construction Permit',
+            status: 'under-review',
+            authority: 'Coastal Management Authority',
+            submission_date: '2025-08-15',
+            expected_decision: '2025-10-30',
+            conditions: 0
+          },
+          {
+            id: 'env-permit',
+            name: 'Environmental Impact Permit',
+            status: 'approved',
+            authority: 'Ministry of Environment',
+            issue_date: '2025-07-10',
+            expiry_date: '2027-07-10',
+            conditions: 3
+          }
+        ],
+        deadlines: [
+          {
+            task: 'Submit Marine Impact Assessment',
+            framework: 'Marine Strategy Framework',
+            due_date: '2025-10-15',
+            priority: 'high'
+          },
+          {
+            task: 'Stakeholder Consultation Meeting',
+            framework: 'Local Coastal Management',
+            due_date: '2025-09-30',
+            priority: 'medium'
+          },
+          {
+            task: 'Quarterly Monitoring Report',
+            framework: 'EU EIA Directive',
+            due_date: '2025-12-01',
+            priority: 'low'
+          }
+        ]
+      };
+      setComplianceData(data);
+    } catch (error) {
+      console.error('Failed to load demo data:', error);
+      // Set empty data structure as final fallback
+      setComplianceData({ frameworks: [], permits: [], deadlines: [] });
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   // Load compliance data for selected project
   const loadComplianceData = useCallback(async (projectId) => {
     try {
       setLoading(true);
       const response = await complianceAPI.getByProject(projectId);
-      setComplianceData(response.data);
+      // Handle different response formats
+      const data = response.data?.data || response.data || { frameworks: [], permits: [], deadlines: [] };
+      setComplianceData(data);
     } catch (error) {
       console.error('Failed to load compliance data for project:', error);
       // Fallback to demo data
@@ -26,44 +120,25 @@ const ComplianceDashboard = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadDemoData]);
 
-  // Load demo data as fallback
-  const loadDemoData = useCallback(async () => {
-    try {
-      const response = await complianceAPI.getDemo();
-      setComplianceData(response.data);
-    } catch (error) {
-      console.error('Failed to load demo data:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  // Load projects on component mount
+  // Load initial data on component mount
   useEffect(() => {
-    const loadProjects = async () => {
-      try {
-        const response = await projectsAPI.getAll();
-        setProjects(response.data);
-        if (response.data.length > 0) {
-          setSelectedProject(response.data[0].name);
-          loadComplianceData(response.data[0].id);
-        } else {
-          // No projects, use demo data
-          loadDemoData();
-        }
-      } catch (error) {
-        console.error('Failed to load projects:', error);
-        loadDemoData();
-      }
-    };
-    loadProjects();
-  }, [loadComplianceData, loadDemoData]);
+    if (Array.isArray(projects) && projects.length > 0) {
+      const firstProject = projects[0];
+      setSelectedProjectName(firstProject.name || '');
+      loadComplianceData(firstProject.id);
+    } else {
+      // No projects, use demo data
+      loadDemoData();
+    }
+  }, [projects, loadComplianceData, loadDemoData]);
 
   // Handle project selection change
   const handleProjectChange = (projectName) => {
-    setSelectedProject(projectName);
+    setSelectedProjectName(projectName);
+    if (!Array.isArray(projects)) return;
+    
     const project = projects.find(p => p.name === projectName);
     if (project) {
       loadComplianceData(project.id);
@@ -112,22 +187,25 @@ const ComplianceDashboard = () => {
   };
 
   const filteredFrameworks = selectedFramework === 'all' 
-    ? complianceData.frameworks 
-    : complianceData.frameworks.filter(f => f.id === selectedFramework);
+    ? (complianceData.frameworks || [])
+    : (complianceData.frameworks || []).filter(f => f.id === selectedFramework);
 
   const calculateComplianceScore = () => {
-    if (complianceData.frameworks.length === 0) return 0;
-    const totalCompleted = complianceData.frameworks.reduce((sum, f) => sum + (f.completed || 0), 0);
-    const totalRequired = complianceData.frameworks.reduce((sum, f) => sum + (f.requirements || 0), 0);
+    const frameworks = complianceData.frameworks || [];
+    if (frameworks.length === 0) return 0;
+    const totalCompleted = frameworks.reduce((sum, f) => sum + (f.completed || 0), 0);
+    const totalRequired = frameworks.reduce((sum, f) => sum + (f.requirements || 0), 0);
     return totalRequired > 0 ? Math.round((totalCompleted / totalRequired) * 100) : 0;
   };
 
   const getHighRiskCount = () => {
-    return complianceData.frameworks.filter(f => f.risk_level === 'high').length;
+    const frameworks = complianceData.frameworks || [];
+    return frameworks.filter(f => f.risk_level === 'high').length;
   };
 
   const getApprovedPermits = () => {
-    return complianceData.permits.filter(p => p.status === 'approved').length;
+    const permits = complianceData.permits || [];
+    return permits.filter(p => p.status === 'approved').length;
   };
 
   if (loading) {
@@ -153,7 +231,7 @@ const ComplianceDashboard = () => {
           <div className="flex items-center space-x-4">
             <div className="text-right">
               <p className="text-sm text-yellow-200">Active Frameworks</p>
-              <p className="text-xl font-bold">{complianceData.frameworks.length}</p>
+              <p className="text-xl font-bold">{(complianceData.frameworks || []).length}</p>
             </div>
             <button className="px-4 py-2 bg-white text-yellow-700 rounded-lg hover:bg-gray-100 flex items-center space-x-2 font-medium">
               <FileText size={16} />
@@ -169,14 +247,20 @@ const ComplianceDashboard = () => {
           <div className="bg-white rounded-lg shadow-sm border p-4">
             <label className="block text-sm font-medium text-gray-700 mb-2">Project</label>
             <select 
-              value={selectedProject}
+              value={selectedProjectName}
               onChange={(e) => handleProjectChange(e.target.value)}
               className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
             >
               <option value="">Select a project</option>
-              {projects.map(project => (
-                <option key={project.id} value={project.name}>{project.name}</option>
-              ))}
+              {Array.isArray(projects) && projects.length > 0 ? (
+                projects.map(project => (
+                  <option key={project.id} value={project.name || project.projectName || `Project ${project.id}`}>
+                    {project.name || project.projectName || `Project ${project.id}`}
+                  </option>
+                ))
+              ) : (
+                <option value="" disabled>No projects available</option>
+              )}
             </select>
           </div>
           
@@ -188,7 +272,7 @@ const ComplianceDashboard = () => {
               className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
             >
               <option value="all">All Frameworks</option>
-              {complianceData.frameworks.map(framework => (
+              {Array.isArray(complianceData.frameworks) && complianceData.frameworks.map(framework => (
                 <option key={framework.id} value={framework.id}>{framework.name}</option>
               ))}
             </select>
@@ -237,7 +321,7 @@ const ComplianceDashboard = () => {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-gray-600 text-sm">Upcoming Deadlines</p>
-                <p className="text-2xl font-bold text-yellow-600">{complianceData.deadlines.length}</p>
+                <p className="text-2xl font-bold text-yellow-600">{(complianceData.deadlines || []).length}</p>
               </div>
               <div className="p-3 bg-yellow-100 rounded-full">
                 <Clock size={24} className="text-yellow-600" />
@@ -324,7 +408,7 @@ const ComplianceDashboard = () => {
               </div>
               
               <div className="p-4 space-y-3">
-                {complianceData.deadlines.length > 0 ? (
+                {Array.isArray(complianceData.deadlines) && complianceData.deadlines.length > 0 ? (
                   complianceData.deadlines.map((deadline, index) => (
                     <div key={index} className={`border-l-4 pl-3 py-2 ${getPriorityColor(deadline.priority)}`}>
                       <p className="font-medium text-gray-900 text-sm">{deadline.task}</p>
@@ -354,7 +438,7 @@ const ComplianceDashboard = () => {
               </div>
               
               <div className="p-4 space-y-3">
-                {complianceData.permits.length > 0 ? (
+                {Array.isArray(complianceData.permits) && complianceData.permits.length > 0 ? (
                   complianceData.permits.map(permit => (
                     <div key={permit.id} className="border rounded-lg p-3">
                       <div className="flex items-center justify-between mb-2">

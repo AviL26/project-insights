@@ -1,26 +1,14 @@
-// context/ProjectContext.js
+// frontend/src/context/ProjectContext.js - Updated with Archive System
 import React, { createContext, useContext, useReducer, useEffect } from 'react';
 import { projectsAPI } from '../services/api';
 
 const ProjectContext = createContext();
 
-/**
- * @typedef {Object} Project
- * @property {string} id
- * @property {string} name
- * @property {number} lat
- * @property {number} lon
- * @property {number} length
- * @property {number} width
- * @property {number} height
- * @property {Date} createdAt
- * @property {Date|null} deletedAt
- */
-
-/** @type {{projects: Project[], currentProject: Project|null, isLoading: boolean, error: string|null}} */
 const initialState = {
-  projects: [],
+  activeProjects: [],
+  archivedProjects: [],
   currentProject: null,
+  currentView: 'active', // 'active' or 'archived'
   isLoading: false,
   error: null
 };
@@ -31,44 +19,86 @@ const projectReducer = (state, action) => {
       return { ...state, isLoading: action.payload, error: null };
     case 'SET_ERROR':
       return { ...state, error: action.payload, isLoading: false };
-    case 'SET_PROJECTS':
-      return { ...state, projects: action.payload, isLoading: false, error: null };
+    case 'SET_ACTIVE_PROJECTS':
+      return { ...state, activeProjects: action.payload, isLoading: false, error: null };
+    case 'SET_ARCHIVED_PROJECTS':
+      return { ...state, archivedProjects: action.payload, error: null };
+    case 'SET_CURRENT_VIEW':
+      return { ...state, currentView: action.payload };
     case 'ADD_PROJECT':
       return {
         ...state,
-        projects: [action.payload, ...state.projects],
+        activeProjects: [action.payload, ...state.activeProjects],
         currentProject: action.payload,
         isLoading: false,
         error: null
       };
     case 'SET_CURRENT_PROJECT':
-      if (!action.payload.lat && !action.payload.lon) {
+      if (action.payload.lat == null || action.payload.lon == null) {
         console.warn('Project missing lat/lon:', action.payload);
       }
       return { ...state, currentProject: action.payload };
-    case 'DELETE_PROJECT':
+    case 'ARCHIVE_PROJECT':
+      const projectToArchive = state.activeProjects.find(p => p.id === action.payload.id);
+      if (!projectToArchive) return state;
+      
       return {
         ...state,
-        projects: state.projects.filter(project => project.id !== action.payload),
-        // Clear currentProject if it's the one being deleted
+        activeProjects: state.activeProjects.filter(p => p.id !== action.payload.id),
+        archivedProjects: [{ ...projectToArchive, status: 'archived' }, ...state.archivedProjects],
+        currentProject: state.currentProject?.id === action.payload.id ? null : state.currentProject,
+        error: null
+      };
+    case 'RESTORE_PROJECT':
+      const projectToRestore = state.archivedProjects.find(p => p.id === action.payload.id);
+      if (!projectToRestore) return state;
+      
+      return {
+        ...state,
+        archivedProjects: state.archivedProjects.filter(p => p.id !== action.payload.id),
+        activeProjects: [{ ...projectToRestore, status: 'active' }, ...state.activeProjects],
+        error: null
+      };
+    case 'BULK_ARCHIVE_PROJECTS':
+      const projectsToArchive = state.activeProjects.filter(p => action.payload.includes(p.id));
+      const remainingActive = state.activeProjects.filter(p => !action.payload.includes(p.id));
+      const newlyArchived = projectsToArchive.map(p => ({ ...p, status: 'archived' }));
+      
+      return {
+        ...state,
+        activeProjects: remainingActive,
+        archivedProjects: [...newlyArchived, ...state.archivedProjects],
+        currentProject: action.payload.includes(state.currentProject?.id) ? null : state.currentProject,
+        error: null
+      };
+    case 'DELETE_PROJECT_PERMANENT':
+      return {
+        ...state,
+        activeProjects: state.activeProjects.filter(p => p.id !== action.payload),
+        archivedProjects: state.archivedProjects.filter(p => p.id !== action.payload),
         currentProject: state.currentProject?.id === action.payload ? null : state.currentProject,
         error: null
       };
-    case 'BULK_DELETE_PROJECTS':
+    case 'BULK_DELETE_PERMANENT':
       return {
         ...state,
-        projects: state.projects.filter(project => !action.payload.includes(project.id)),
-        // Clear currentProject if it's one of the deleted ones
+        activeProjects: state.activeProjects.filter(p => !action.payload.includes(p.id)),
+        archivedProjects: state.archivedProjects.filter(p => !action.payload.includes(p.id)),
         currentProject: action.payload.includes(state.currentProject?.id) ? null : state.currentProject,
         error: null
       };
     case 'UPDATE_PROJECT':
+      const isInActive = state.activeProjects.some(p => p.id === action.payload.id);
+      const isInArchived = state.archivedProjects.some(p => p.id === action.payload.id);
+      
       return {
         ...state,
-        projects: state.projects.map(project =>
-          project.id === action.payload.id ? action.payload : project
-        ),
-        // Update currentProject if it's the one being updated
+        activeProjects: isInActive ? state.activeProjects.map(p => 
+          p.id === action.payload.id ? action.payload : p
+        ) : state.activeProjects,
+        archivedProjects: isInArchived ? state.archivedProjects.map(p => 
+          p.id === action.payload.id ? action.payload : p
+        ) : state.archivedProjects,
         currentProject: state.currentProject?.id === action.payload.id ? action.payload : state.currentProject,
         error: null
       };
@@ -87,13 +117,17 @@ export const ProjectProvider = ({ children }) => {
     const loadProjects = async () => {
       dispatch({ type: 'SET_LOADING', payload: true });
       try {
-        const response = await projectsAPI.getAll();
+        // Load both active and archived projects
+        const [activeResponse, archivedResponse] = await Promise.all([
+          projectsAPI.getByStatus('active'),
+          projectsAPI.getByStatus('archived')
+        ]);
         
-        // Handle different response formats - backend now returns {data: projects}
-        const projects = response.data?.data || response.data || [];
+        const activeProjects = activeResponse.data?.data || [];
+        const archivedProjects = archivedResponse.data?.data || [];
         
         // Ensure lat/lon defaults if missing
-        const projectsWithCoords = projects.map(p => ({
+        const processProjects = (projects) => projects.map(p => ({
           lat: 0,
           lon: 0,
           length: 0,
@@ -102,7 +136,8 @@ export const ProjectProvider = ({ children }) => {
           ...p
         }));
         
-        dispatch({ type: 'SET_PROJECTS', payload: projectsWithCoords });
+        dispatch({ type: 'SET_ACTIVE_PROJECTS', payload: processProjects(activeProjects) });
+        dispatch({ type: 'SET_ARCHIVED_PROJECTS', payload: processProjects(archivedProjects) });
       } catch (error) {
         console.error('Failed to load projects:', error);
         dispatch({ type: 'SET_ERROR', payload: error.message || 'Failed to load projects' });
@@ -112,20 +147,26 @@ export const ProjectProvider = ({ children }) => {
     loadProjects();
   }, []);
 
-  /** @param {Partial<Project>} projectData */
+  // Get current projects based on view
+  const getCurrentProjects = () => {
+    return state.currentView === 'active' ? state.activeProjects : state.archivedProjects;
+  };
+
+  // Switch between active and archived views
+  const setCurrentView = (view) => {
+    dispatch({ type: 'SET_CURRENT_VIEW', payload: view });
+  };
+
   const createProject = async (projectData) => {
     dispatch({ type: 'SET_LOADING', payload: true });
     try {
-      // Ensure defaults for coordinates
       const payload = { lat: 0, lon: 0, length: 0, width: 0, height: 0, ...projectData };
       const response = await projectsAPI.create(payload);
 
-      // Handle different response formats
       const newProject = response.data?.data || response.data;
       const projectWithDefaults = { lat: 0, lon: 0, length: 0, width: 0, height: 0, ...newProject };
       
       dispatch({ type: 'ADD_PROJECT', payload: projectWithDefaults });
-
       return projectWithDefaults;
     } catch (error) {
       const errorMessage = error.response?.data?.error || error.message || 'Failed to create project';
@@ -134,79 +175,140 @@ export const ProjectProvider = ({ children }) => {
     }
   };
 
-  /** @param {string} projectId */
-  const deleteProject = async (projectId) => {
-    // Optimistic update - remove from UI immediately
-    const originalProjects = state.projects;
-    dispatch({ type: 'DELETE_PROJECT', payload: projectId });
+  const archiveProject = async (projectId) => {
+    const originalActiveProjects = state.activeProjects;
+    dispatch({ type: 'ARCHIVE_PROJECT', payload: { id: projectId } });
     
     try {
-      // Call backend API
-      const response = await projectsAPI.delete(projectId);
+      const response = await projectsAPI.archive(projectId);
       
-      // Check if deletion was successful
       if (!response.data?.success) {
-        throw new Error(response.data?.error || 'Failed to delete project');
+        throw new Error(response.data?.error || 'Failed to archive project');
       }
       
-      console.log('Project deleted successfully:', response.data.message);
       return true;
     } catch (error) {
       // Revert optimistic update on error
-      dispatch({ type: 'SET_PROJECTS', payload: originalProjects });
+      dispatch({ type: 'SET_ACTIVE_PROJECTS', payload: originalActiveProjects });
       
-      const errorMessage = error.response?.data?.error || error.message || 'Failed to delete project';
+      const errorMessage = error.response?.data?.error || error.message || 'Failed to archive project';
       dispatch({ type: 'SET_ERROR', payload: errorMessage });
       throw new Error(errorMessage);
     }
   };
 
-  /** @param {number[]} projectIds */
-  const bulkDeleteProjects = async (projectIds) => {
-    // Validation
+  const restoreProject = async (projectId) => {
+    const originalArchivedProjects = state.archivedProjects;
+    dispatch({ type: 'RESTORE_PROJECT', payload: { id: projectId } });
+    
+    try {
+      const response = await projectsAPI.restore(projectId);
+      
+      if (!response.data?.success) {
+        throw new Error(response.data?.error || 'Failed to restore project');
+      }
+      
+      return true;
+    } catch (error) {
+      // Revert optimistic update on error
+      dispatch({ type: 'SET_ARCHIVED_PROJECTS', payload: originalArchivedProjects });
+      
+      const errorMessage = error.response?.data?.error || error.message || 'Failed to restore project';
+      dispatch({ type: 'SET_ERROR', payload: errorMessage });
+      throw new Error(errorMessage);
+    }
+  };
+
+  const deleteProjectPermanent = async (projectId) => {
+    const originalActiveProjects = state.activeProjects;
+    const originalArchivedProjects = state.archivedProjects;
+    dispatch({ type: 'DELETE_PROJECT_PERMANENT', payload: projectId });
+    
+    try {
+      const response = await projectsAPI.deletePermanent(projectId);
+      
+      if (!response.data?.success) {
+        throw new Error(response.data?.error || 'Failed to permanently delete project');
+      }
+      
+      return true;
+    } catch (error) {
+      // Revert optimistic update on error
+      dispatch({ type: 'SET_ACTIVE_PROJECTS', payload: originalActiveProjects });
+      dispatch({ type: 'SET_ARCHIVED_PROJECTS', payload: originalArchivedProjects });
+      
+      const errorMessage = error.response?.data?.error || error.message || 'Failed to permanently delete project';
+      dispatch({ type: 'SET_ERROR', payload: errorMessage });
+      throw new Error(errorMessage);
+    }
+  };
+
+  const bulkArchiveProjects = async (projectIds) => {
     if (!Array.isArray(projectIds) || projectIds.length === 0) {
       throw new Error('Project IDs must be a non-empty array');
     }
 
-    // Optimistic update - remove from UI immediately
-    const originalProjects = state.projects;
-    dispatch({ type: 'BULK_DELETE_PROJECTS', payload: projectIds });
+    const originalActiveProjects = state.activeProjects;
+    dispatch({ type: 'BULK_ARCHIVE_PROJECTS', payload: projectIds });
     
     try {
-      // Call backend API
-      const response = await projectsAPI.bulkDelete(projectIds);
+      const response = await projectsAPI.bulkArchive(projectIds);
       
-      // Check if deletion was successful
       if (!response.data?.success) {
-        throw new Error(response.data?.error || 'Failed to delete projects');
+        throw new Error(response.data?.error || 'Failed to archive projects');
       }
       
-      console.log('Projects bulk deleted successfully:', response.data.message);
+      return {
+        archivedCount: response.data.data.archivedCount,
+        archivedProjects: response.data.data.archivedProjects
+      };
+    } catch (error) {
+      // Revert optimistic update on error
+      dispatch({ type: 'SET_ACTIVE_PROJECTS', payload: originalActiveProjects });
+      
+      const errorMessage = error.response?.data?.error || error.message || 'Failed to archive projects';
+      dispatch({ type: 'SET_ERROR', payload: errorMessage });
+      throw new Error(errorMessage);
+    }
+  };
+
+  const bulkDeletePermanent = async (projectIds) => {
+    if (!Array.isArray(projectIds) || projectIds.length === 0) {
+      throw new Error('Project IDs must be a non-empty array');
+    }
+
+    const originalActiveProjects = state.activeProjects;
+    const originalArchivedProjects = state.archivedProjects;
+    dispatch({ type: 'BULK_DELETE_PERMANENT', payload: projectIds });
+    
+    try {
+      const response = await projectsAPI.bulkDeletePermanent(projectIds);
+      
+      if (!response.data?.success) {
+        throw new Error(response.data?.error || 'Failed to permanently delete projects');
+      }
+      
       return {
         deletedCount: response.data.data.deletedCount,
         deletedProjects: response.data.data.deletedProjects
       };
     } catch (error) {
       // Revert optimistic update on error
-      dispatch({ type: 'SET_PROJECTS', payload: originalProjects });
+      dispatch({ type: 'SET_ACTIVE_PROJECTS', payload: originalActiveProjects });
+      dispatch({ type: 'SET_ARCHIVED_PROJECTS', payload: originalArchivedProjects });
       
-      const errorMessage = error.response?.data?.error || error.message || 'Failed to delete projects';
+      const errorMessage = error.response?.data?.error || error.message || 'Failed to permanently delete projects';
       dispatch({ type: 'SET_ERROR', payload: errorMessage });
       throw new Error(errorMessage);
     }
   };
 
-  /** @param {Partial<Project>} updatedProject */
   const updateProject = async (updatedProject) => {
     try {
-      // Update in backend API
       const response = await projectsAPI.update(updatedProject.id, updatedProject);
-      
-      // Handle different response formats
       const updated = response.data?.data || response.data;
       
       dispatch({ type: 'UPDATE_PROJECT', payload: updated });
-      
       return updated;
     } catch (error) {
       const errorMessage = error.response?.data?.error || error.message || 'Failed to update project';
@@ -215,28 +317,37 @@ export const ProjectProvider = ({ children }) => {
     }
   };
 
-  /** @param {Project} project */
   const setCurrentProject = (project) => {
-    // Enforce defaults on current project
     const projectWithDefaults = { lat: 0, lon: 0, length: 0, width: 0, height: 0, ...project };
     dispatch({ type: 'SET_CURRENT_PROJECT', payload: projectWithDefaults });
   };
 
-  /** Clear any error state */
   const clearError = () => {
     dispatch({ type: 'CLEAR_ERROR' });
   };
 
+  // Legacy compatibility - map old methods to new archive methods
+  const deleteProject = archiveProject;
+  const bulkDeleteProjects = bulkArchiveProjects;
+
   return (
-    <ProjectContext.Provider value={{ 
-      state, 
-      dispatch, 
-      createProject, 
-      deleteProject, 
-      bulkDeleteProjects,
-      updateProject, 
+    <ProjectContext.Provider value={{
+      state,
+      dispatch,
+      getCurrentProjects,
+      setCurrentView,
+      createProject,
+      archiveProject,
+      restoreProject,
+      deleteProjectPermanent,
+      bulkArchiveProjects,
+      bulkDeletePermanent,
+      updateProject,
       setCurrentProject,
-      clearError
+      clearError,
+      // Legacy methods for backward compatibility
+      deleteProject,
+      bulkDeleteProjects
     }}>
       {children}
     </ProjectContext.Provider>
