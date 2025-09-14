@@ -1,15 +1,16 @@
-// src/App.js
+// src/App.js - Complete Updated Version with Error Boundaries
 import React, { useState } from 'react';
 import { ProjectProvider } from './context/ProjectContext';
 import ProjectsLandingPage from './components/ProjectsLandingPage';
 import MaterialsDashboard from './components/Materials/MaterialsDashboard';
 import EcologicalDashboard from './components/Ecological/EcologicalDashboard';
-import ComplianceDashboard from './components/Compliance/ComplianceDashboard'; // Add this import
+import ComplianceDashboard from './components/Compliance/ComplianceDashboard';
 import ProjectSetupWizard from './components/ProjectSetup/ProjectSetupWizard';
-import { Home, ArrowLeft, Building2, Leaf, Shield, X } from 'lucide-react'; // Add Shield icon
+import ErrorBoundary from './components/ErrorBoundary';
+import { Home, ArrowLeft, Building2, Leaf, Shield, X } from 'lucide-react';
 
 function App() {
-  const [currentView, setCurrentView] = useState('landing'); // 'landing', 'materials', 'ecological', 'compliance'
+  const [currentView, setCurrentView] = useState('landing');
   const [showWizardModal, setShowWizardModal] = useState(false);
   const [selectedProject, setSelectedProject] = useState(null);
 
@@ -20,12 +21,12 @@ function App() {
   };
 
   const handleCreateNewProject = () => {
-    setShowWizardModal(true); // Open wizard as modal
+    setShowWizardModal(true);
   };
 
   const handleWizardComplete = (newProject) => {
     setSelectedProject(newProject);
-    setShowWizardModal(false); // Close modal
+    setShowWizardModal(false);
     setCurrentView('materials'); // Navigate to materials after project creation
   };
 
@@ -42,7 +43,7 @@ function App() {
     setCurrentView(view);
   };
 
-  // Simple Header Component (embedded)
+  // Simple Header Component
   const SimpleHeader = ({ children }) => (
     <header className="bg-white shadow-sm border-b border-gray-200">
       <div className="px-6 py-4">
@@ -51,7 +52,7 @@ function App() {
     </header>
   );
 
-  // Simple Sidebar Component (embedded) - Updated with Compliance
+  // Simple Sidebar Component
   const SimpleSidebar = () => (
     <div className="w-64 bg-white shadow-lg border-r border-gray-200 flex flex-col">
       {/* Project Info */}
@@ -61,10 +62,12 @@ function App() {
             {selectedProject.projectName || selectedProject.name}
           </h3>
           <p className="text-sm text-gray-500">
-            {selectedProject.structureType || 'Marine Infrastructure Project'}
+            {selectedProject.structureType || selectedProject.structure_type || 'Marine Infrastructure Project'}
           </p>
           {selectedProject.region && (
-            <p className="text-xs text-gray-400 mt-1">{selectedProject.region}, {selectedProject.country}</p>
+            <p className="text-xs text-gray-400 mt-1">
+              {selectedProject.region}, {selectedProject.country}
+            </p>
           )}
         </div>
       )}
@@ -106,7 +109,6 @@ function App() {
             </div>
           </button>
 
-          {/* Add Compliance Navigation Button */}
           <button
             onClick={() => handleViewChange('compliance')}
             className={`w-full flex items-center space-x-3 px-3 py-3 rounded-lg text-left transition-colors ${
@@ -128,11 +130,16 @@ function App() {
           <div className="mt-6 p-3 bg-gray-50 rounded-lg">
             <h4 className="font-medium text-gray-900 text-sm mb-2">Project Details</h4>
             <div className="space-y-1 text-xs text-gray-600">
-              {selectedProject.waterDepth && (
-                <div>Water Depth: {selectedProject.waterDepth}m</div>
+              {selectedProject.water_depth && (
+                <div>Water Depth: {selectedProject.water_depth}m</div>
               )}
-              {selectedProject.waveExposure && (
-                <div>Wave Exposure: {selectedProject.waveExposure}</div>
+              {selectedProject.wave_exposure && (
+                <div>Wave Exposure: {selectedProject.wave_exposure}</div>
+              )}
+              {(selectedProject.length && selectedProject.width && selectedProject.height) && (
+                <div>
+                  Dimensions: {selectedProject.length}×{selectedProject.width}×{selectedProject.height}m
+                </div>
               )}
               {selectedProject.dimensions && (
                 <div>
@@ -180,10 +187,12 @@ function App() {
           
           {/* Wizard Content */}
           <div className="flex-1 overflow-auto">
-            <ProjectSetupWizard 
-              onComplete={handleWizardComplete}
-              isModal={true} // Pass a flag to adjust wizard styling if needed
-            />
+            <ErrorBoundary>
+              <ProjectSetupWizard 
+                onComplete={handleWizardComplete}
+                isModal={true}
+              />
+            </ErrorBoundary>
           </div>
         </div>
       </div>
@@ -200,98 +209,107 @@ function App() {
   };
 
   return (
-    <ProjectProvider>
-      <div className="App">
-        {currentView === 'landing' ? (
-          // Landing Page View
-          <ProjectsLandingPage
-            onNavigateToProject={handleNavigateToProject}
-            onCreateNewProject={handleCreateNewProject}
-          />
-        ) : (
-          // Dashboard Views with Navigation
-          <div className="flex h-screen bg-gray-100">
-            {/* Sidebar */}
-            <SimpleSidebar />
-            
-            {/* Main Content */}
-            <div className="flex-1 flex flex-col overflow-hidden">
-              {/* Header */}
-              <SimpleHeader>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-4">
-                    <button
-                      onClick={handleBackToLanding}
-                      className="flex items-center space-x-2 px-3 py-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
-                    >
-                      <ArrowLeft size={16} />
-                      <span>Projects</span>
-                    </button>
-                    <span className="text-gray-400">/</span>
-                    <span className="text-gray-600">{selectedProject?.projectName || selectedProject?.name || 'Project'}</span>
-                    <span className="text-gray-400">/</span>
-                    <span className="font-medium text-gray-900">
-                      {getCurrentViewTitle()}
-                    </span>
-                  </div>
-                  
-                  <div className="flex items-center space-x-2">
-                    <button
-                      onClick={() => handleViewChange('materials')}
-                      className={`px-3 py-1 rounded-lg text-sm transition-colors ${
-                        currentView === 'materials'
-                          ? 'bg-blue-100 text-blue-700'
-                          : 'text-gray-600 hover:bg-gray-100'
-                      }`}
-                    >
-                      Materials
-                    </button>
-                    <button
-                      onClick={() => handleViewChange('ecological')}
-                      className={`px-3 py-1 rounded-lg text-sm transition-colors ${
-                        currentView === 'ecological'
-                          ? 'bg-green-100 text-green-700'
-                          : 'text-gray-600 hover:bg-gray-100'
-                      }`}
-                    >
-                      Ecological
-                    </button>
-                    {/* Add Compliance Header Button */}
-                    <button
-                      onClick={() => handleViewChange('compliance')}
-                      className={`px-3 py-1 rounded-lg text-sm transition-colors ${
-                        currentView === 'compliance'
-                          ? 'bg-yellow-100 text-yellow-700'
-                          : 'text-gray-600 hover:bg-gray-100'
-                      }`}
-                    >
-                      Compliance
-                    </button>
-                    
-                    <button
-                      onClick={handleCreateNewProject}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm ml-2"
-                    >
-                      New Project
-                    </button>
-                  </div>
-                </div>
-              </SimpleHeader>
+    <ErrorBoundary>
+      <ProjectProvider>
+        <div className="App">
+          {currentView === 'landing' ? (
+            // Landing Page View with Error Boundary
+            <ErrorBoundary>
+              <ProjectsLandingPage
+                onNavigateToProject={handleNavigateToProject}
+                onCreateNewProject={handleCreateNewProject}
+              />
+            </ErrorBoundary>
+          ) : (
+            // Dashboard Views with Navigation
+            <div className="flex h-screen bg-gray-100">
+              {/* Sidebar */}
+              <ErrorBoundary>
+                <SimpleSidebar />
+              </ErrorBoundary>
               
-              {/* Dashboard Content */}
-              <main className="flex-1 overflow-auto bg-gray-50">
-                {currentView === 'materials' && <MaterialsDashboard />}
-                {currentView === 'ecological' && <EcologicalDashboard />}
-                {currentView === 'compliance' && <ComplianceDashboard />}
-              </main>
+              {/* Main Content */}
+              <div className="flex-1 flex flex-col overflow-hidden">
+                {/* Header */}
+                <SimpleHeader>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-4">
+                      <button
+                        onClick={handleBackToLanding}
+                        className="flex items-center space-x-2 px-3 py-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+                      >
+                        <ArrowLeft size={16} />
+                        <span>Projects</span>
+                      </button>
+                      <span className="text-gray-400">/</span>
+                      <span className="text-gray-600">
+                        {selectedProject?.projectName || selectedProject?.name || 'Project'}
+                      </span>
+                      <span className="text-gray-400">/</span>
+                      <span className="font-medium text-gray-900">
+                        {getCurrentViewTitle()}
+                      </span>
+                    </div>
+                    
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={() => handleViewChange('materials')}
+                        className={`px-3 py-1 rounded-lg text-sm transition-colors ${
+                          currentView === 'materials'
+                            ? 'bg-blue-100 text-blue-700'
+                            : 'text-gray-600 hover:bg-gray-100'
+                        }`}
+                      >
+                        Materials
+                      </button>
+                      <button
+                        onClick={() => handleViewChange('ecological')}
+                        className={`px-3 py-1 rounded-lg text-sm transition-colors ${
+                          currentView === 'ecological'
+                            ? 'bg-green-100 text-green-700'
+                            : 'text-gray-600 hover:bg-gray-100'
+                        }`}
+                      >
+                        Ecological
+                      </button>
+                      <button
+                        onClick={() => handleViewChange('compliance')}
+                        className={`px-3 py-1 rounded-lg text-sm transition-colors ${
+                          currentView === 'compliance'
+                            ? 'bg-yellow-100 text-yellow-700'
+                            : 'text-gray-600 hover:bg-gray-100'
+                        }`}
+                      >
+                        Compliance
+                      </button>
+                      
+                      <button
+                        onClick={handleCreateNewProject}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm ml-2"
+                      >
+                        New Project
+                      </button>
+                    </div>
+                  </div>
+                </SimpleHeader>
+                
+                {/* Dashboard Content with Error Boundaries */}
+                <main className="flex-1 overflow-auto bg-gray-50">
+                  <ErrorBoundary>
+                    {currentView === 'materials' && <MaterialsDashboard />}
+                    {currentView === 'ecological' && <EcologicalDashboard />}
+                    {currentView === 'compliance' && <ComplianceDashboard />}
+                  </ErrorBoundary>
+                </main>
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Wizard Modal Overlay */}
-        <WizardModal />
-      </div>
-    </ProjectProvider>
+          {/* Wizard Modal Overlay */}
+          <WizardModal />
+        </div>
+      </ProjectProvider>
+    </ErrorBoundary>
   );
 }
 

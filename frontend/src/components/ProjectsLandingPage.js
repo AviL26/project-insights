@@ -1,11 +1,13 @@
-// src/components/ProjectsLandingPage.js - Updated with Archive System
+// src/components/ProjectsLandingPage.js - Corrected Version
 import React, { useState } from 'react';
 import { useProject } from '../context/ProjectContext';
+import { useToast, ToastContainer } from './Toast';
+import useDebounce from '../hooks/useDebounce';
+import ProjectCard from './ProjectCard';
+import { formatProjectLocation } from '../utils/projectUtils';
 import { 
-  Plus, Search, Filter, MapPin, Calendar, Waves, Leaf, 
-  MoreVertical, Edit3, Trash2, Eye, ArrowRight, Building2,
-  Clock, TrendingUp, AlertCircle, CheckCircle, X, Archive,
-  ArchiveRestore, AlertTriangle as Warning
+  Plus, Search, Filter, Building2, Clock, TrendingUp, 
+  Archive, X
 } from 'lucide-react';
 
 const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
@@ -17,10 +19,15 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
     restoreProject,
     deleteProjectPermanent, 
     bulkArchiveProjects, 
-    bulkDeletePermanent 
+    bulkDeletePermanent,
+    clearError  // Added clearError here
   } = useProject();
   
-  const [searchTerm, setSearchTerm] = useState('');
+  // Toast notifications
+  const { toasts, success, error, warning } = useToast();
+  
+  // Search and filter state
+  const [searchInput, setSearchInput] = useState('');
   const [filterType, setFilterType] = useState('all');
   const [sortBy, setSortBy] = useState('recent');
   const [deletingProjectId, setDeletingProjectId] = useState(null);
@@ -29,6 +36,9 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedProjects, setSelectedProjects] = useState(new Set());
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
+
+  // Debounced search (300ms delay)
+  const debouncedSearchTerm = useDebounce(searchInput, 300);
 
   const currentProjects = getCurrentProjects();
   const isArchivedView = state.currentView === 'archived';
@@ -39,17 +49,14 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
     lastModified: new Date(project.updated_at || Date.now() - Math.random() * 30 * 24 * 60 * 60 * 1000),
     progress: Math.floor(Math.random() * 100),
     type: project.structure_type || project.type || 'Marine Infrastructure',
-    location: project.region ? 
-      `${project.region}, ${project.country}` : 
-      project.location || 
-      `${project.latitude || project.lat || '32.0'}°N, ${project.longitude || project.lon || '34.0'}°E`
+    location: formatProjectLocation(project)
   }));
 
-  // Filter and sort projects
+  // Filter and sort projects using debounced search
   const filteredProjects = enhancedProjects
     .filter(project => {
-      const matchesSearch = (project.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-                           (project.description || '').toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesSearch = (project.name || '').toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+                           (project.description || '').toLowerCase().includes(debouncedSearchTerm.toLowerCase());
       const matchesFilter = filterType === 'all' || project.type?.toLowerCase().includes(filterType.toLowerCase());
       return matchesSearch && matchesFilter;
     })
@@ -96,6 +103,7 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
     onNavigateToProject?.(project);
   };
 
+  // Project action handlers with toast notifications
   const handleArchiveProject = async (project, e) => {
     e.stopPropagation();
     
@@ -105,10 +113,10 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
       
       try {
         await archiveProject(project.id);
-        console.log(`Project "${projectName}" archived successfully`);
-      } catch (error) {
-        console.error('Error archiving project:', error);
-        alert('Failed to archive project. Please try again.');
+        success(`Project "${projectName}" archived successfully`);
+      } catch (err) {
+        console.error('Error archiving project:', err);
+        error('Failed to archive project. Please try again.');
       } finally {
         setDeletingProjectId(null);
       }
@@ -124,10 +132,10 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
       
       try {
         await restoreProject(project.id);
-        console.log(`Project "${projectName}" restored successfully`);
-      } catch (error) {
-        console.error('Error restoring project:', error);
-        alert('Failed to restore project. Please try again.');
+        success(`Project "${projectName}" restored successfully`);
+      } catch (err) {
+        console.error('Error restoring project:', err);
+        error('Failed to restore project. Please try again.');
       } finally {
         setDeletingProjectId(null);
       }
@@ -146,10 +154,10 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
       
       try {
         await deleteProjectPermanent(project.id);
-        console.log(`Project "${projectName}" permanently deleted`);
-      } catch (error) {
-        console.error('Error permanently deleting project:', error);
-        alert('Failed to permanently delete project. Please try again.');
+        warning(`Project "${projectName}" permanently deleted`, 6000);
+      } catch (err) {
+        console.error('Error permanently deleting project:', err);
+        error('Failed to permanently delete project. Please try again.');
       } finally {
         setDeletingProjectId(null);
       }
@@ -170,12 +178,12 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
       
       try {
         const result = await bulkArchiveProjects(selectedProjectsArray);
-        console.log(`Bulk archive successful: ${result.archivedCount} projects archived`);
+        success(`Successfully archived ${result.archivedCount} projects`);
         setSelectedProjects(new Set());
         setSelectionMode(false);
-      } catch (error) {
-        console.error('Error in bulk archive:', error);
-        alert('Failed to archive projects. Please try again.');
+      } catch (err) {
+        console.error('Error in bulk archive:', err);
+        error('Failed to archive projects. Please try again.');
       } finally {
         setBulkActionLoading(false);
       }
@@ -199,12 +207,12 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
       
       try {
         const result = await bulkDeletePermanent(selectedProjectsArray);
-        console.log(`Bulk permanent delete successful: ${result.deletedCount} projects deleted`);
+        warning(`Permanently deleted ${result.deletedCount} projects`, 6000);
         setSelectedProjects(new Set());
         setSelectionMode(false);
-      } catch (error) {
-        console.error('Error in bulk permanent delete:', error);
-        alert('Failed to permanently delete projects. Please try again.');
+      } catch (err) {
+        console.error('Error in bulk permanent delete:', err);
+        error('Failed to permanently delete projects. Please try again.');
       } finally {
         setBulkActionLoading(false);
       }
@@ -219,8 +227,21 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
     });
   };
 
+  // Empty state messages
+  const noResultsMessage = debouncedSearchTerm || filterType !== 'all' ? 'No projects found' : 
+                           isArchivedView ? 'No archived projects' : 'No active projects yet';
+  
+  const noResultsSubMessage = debouncedSearchTerm || filterType !== 'all' 
+    ? 'Try adjusting your search or filter criteria'
+    : isArchivedView 
+      ? 'Archived projects will appear here when you archive active projects'
+      : 'Create your first project to get started';
+
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Toast Container */}
+      <ToastContainer toasts={toasts} />
+      
       {/* Header */}
       <div className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -334,7 +355,7 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
                       {bulkActionLoading ? (
                         <div className="w-4 h-4 border border-white border-t-transparent rounded-full animate-spin" />
                       ) : (
-                        <Warning size={16} />
+                        <X size={16} />
                       )}
                       <span>Delete Permanently ({selectedProjects.size})</span>
                     </button>
@@ -355,8 +376,8 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
               <input
                 type="text"
                 placeholder="Search projects..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
                 className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent w-64"
               />
             </div>
@@ -400,22 +421,21 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
 
       {/* Projects Grid */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-8">
-        {filteredProjects.length === 0 ? (
+        {state.isLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+            <span className="ml-3 text-gray-600">Loading projects...</span>
+          </div>
+        ) : filteredProjects.length === 0 ? (
           <div className="text-center py-12">
             {isArchivedView ? <Archive size={48} className="mx-auto text-gray-300 mb-4" /> : <Building2 size={48} className="mx-auto text-gray-300 mb-4" />}
             <h3 className="text-lg font-semibold text-gray-600 mb-2">
-              {searchTerm || filterType !== 'all' ? 'No projects found' : 
-               isArchivedView ? 'No archived projects' : 'No active projects yet'}
+              {noResultsMessage}
             </h3>
             <p className="text-gray-500 mb-6">
-              {searchTerm || filterType !== 'all' 
-                ? 'Try adjusting your search or filter criteria'
-                : isArchivedView 
-                  ? 'Archived projects will appear here when you archive active projects'
-                  : 'Create your first project to get started'
-              }
+              {noResultsSubMessage}
             </p>
-            {!searchTerm && filterType === 'all' && !isArchivedView && (
+            {!debouncedSearchTerm && filterType === 'all' && !isArchivedView && (
               <button
                 onClick={onCreateNewProject}
                 className="inline-flex items-center space-x-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
@@ -428,166 +448,42 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredProjects.map((project) => (
-              <div
+              <ProjectCard
                 key={project.id}
-                className={`bg-white rounded-lg shadow-sm border hover:shadow-md transition-all cursor-pointer group relative ${
-                  selectedProjects.has(project.id) ? 'ring-2 ring-blue-500 bg-blue-50' : ''
-                } ${selectionMode ? 'hover:ring-2 hover:ring-blue-300' : ''}`}
-                onClick={() => selectionMode ? toggleProjectSelection(project.id, { stopPropagation: () => {} }) : handleSelectProject(project)}
-              >
-                {/* Selection Checkbox */}
-                {selectionMode && (
-                  <div className="absolute top-4 left-4 z-10">
-                    <input
-                      type="checkbox"
-                      checked={selectedProjects.has(project.id)}
-                      onChange={(e) => toggleProjectSelection(project.id, e)}
-                      className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500 focus:ring-2"
-                    />
-                  </div>
-                )}
-
-                {/* Archive Status Badge */}
-                {isArchivedView && (
-                  <div className="absolute top-4 right-4 z-10">
-                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-700">
-                      <Archive size={12} className="mr-1" />
-                      Archived
-                    </span>
-                  </div>
-                )}
-
-                {/* Project Header */}
-                <div className={`p-6 ${selectionMode ? 'pl-12' : ''}`}>
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex-1">
-                      <h3 className="text-lg font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">
-                        {project.name || `Project ${project.id}`}
-                      </h3>
-                      <p className="text-sm text-gray-600 mt-1">{project.type}</p>
-                    </div>
-                  </div>
-
-                  {/* Project Details */}
-                  <div className="space-y-3">
-                    <div className="flex items-center space-x-2 text-sm text-gray-600">
-                      <MapPin size={14} />
-                      <span>{project.location}</span>
-                    </div>
-                    
-                    <div className="flex items-center space-x-2 text-sm text-gray-600">
-                      <Calendar size={14} />
-                      <span>Modified {formatDate(project.lastModified)}</span>
-                    </div>
-                  </div>
-
-                  {/* Progress Bar - only for active projects */}
-                  {!isArchivedView && (
-                    <div className="mt-4">
-                      <div className="flex items-center justify-between text-sm mb-2">
-                        <span className="text-gray-600">Progress</span>
-                        <span className="text-gray-900 font-medium">{project.progress}%</span>
-                      </div>
-                      <div className="w-full bg-gray-200 rounded-full h-2">
-                        <div 
-                          className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                          style={{ width: `${project.progress}%` }}
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Actions */}
-                  {!selectionMode && (
-                    <div className="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between">
-                      {isArchivedView ? (
-                        // Archived project actions
-                        <div className="flex items-center space-x-4">
-                          <button
-                            onClick={(e) => handleRestoreProject(project, e)}
-                            disabled={deletingProjectId === project.id}
-                            className="flex items-center space-x-1 text-sm text-green-600 hover:text-green-700 disabled:opacity-50"
-                          >
-                            <ArchiveRestore size={14} />
-                            <span>Restore</span>
-                          </button>
-                        </div>
-                      ) : (
-                        // Active project actions
-                        <div className="flex items-center space-x-4">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleSelectProject(project);
-                            }}
-                            className="flex items-center space-x-1 text-sm text-blue-600 hover:text-blue-700"
-                          >
-                            <Waves size={14} />
-                            <span>Ocean Data</span>
-                          </button>
-                          
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleSelectProject(project);
-                            }}
-                            className="flex items-center space-x-1 text-sm text-green-600 hover:text-green-700"
-                          >
-                            <Leaf size={14} />
-                            <span>Ecological</span>
-                          </button>
-                        </div>
-                      )}
-
-                      <div className="flex items-center space-x-2">
-                        {isArchivedView ? (
-                          <button
-                            onClick={(e) => handleDeletePermanent(project, e)}
-                            disabled={deletingProjectId === project.id}
-                            className={`p-1 transition-colors ${
-                              deletingProjectId === project.id 
-                                ? 'text-gray-400 cursor-not-allowed' 
-                                : 'text-gray-400 hover:text-red-500'
-                            }`}
-                            title="Delete permanently"
-                          >
-                            {deletingProjectId === project.id ? (
-                              <div className="w-3.5 h-3.5 border border-gray-300 border-t-transparent rounded-full animate-spin" />
-                            ) : (
-                              <Trash2 size={14} />
-                            )}
-                          </button>
-                        ) : (
-                          <button
-                            onClick={(e) => handleArchiveProject(project, e)}
-                            disabled={deletingProjectId === project.id}
-                            className={`p-1 transition-colors ${
-                              deletingProjectId === project.id 
-                                ? 'text-gray-400 cursor-not-allowed' 
-                                : 'text-gray-400 hover:text-orange-500'
-                            }`}
-                            title="Archive project"
-                          >
-                            {deletingProjectId === project.id ? (
-                              <div className="w-3.5 h-3.5 border border-gray-300 border-t-transparent rounded-full animate-spin" />
-                            ) : (
-                              <Archive size={14} />
-                            )}
-                          </button>
-                        )}
-                        
-                        <ArrowRight size={16} className={`transition-colors ${
-                          isArchivedView ? 'text-gray-300' : 'text-gray-400 group-hover:text-blue-600'
-                        }`} />
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
+                project={project}
+                isArchivedView={isArchivedView}
+                selectionMode={selectionMode}
+                selectedProjects={selectedProjects}
+                deletingProjectId={deletingProjectId}
+                onSelectProject={handleSelectProject}
+                onToggleSelection={toggleProjectSelection}
+                onArchive={handleArchiveProject}
+                onRestore={handleRestoreProject}
+                onDeletePermanent={handleDeletePermanent}
+                formatDate={formatDate}
+              />
             ))}
           </div>
         )}
       </div>
+
+      {/* Error Display */}
+      {state.error && (
+        <div className="fixed bottom-4 left-4 right-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded shadow-lg max-w-md mx-auto">
+          <div className="flex">
+            <div className="flex-1">
+              <strong className="font-bold">Error: </strong>
+              <span className="block sm:inline">{state.error}</span>
+            </div>
+            <button
+              onClick={clearError}
+              className="flex-shrink-0 ml-4"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
