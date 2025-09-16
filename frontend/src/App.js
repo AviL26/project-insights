@@ -1,4 +1,4 @@
-// src/App.js - Updated with Enhanced Compliance Dashboard
+// src/App.js - Complete version with debug logging
 import React, { useState } from 'react';
 import { ProjectProvider } from './context/ProjectContext';
 import { ComplianceProvider } from './context/ComplianceContext';
@@ -15,32 +15,44 @@ function App() {
   const [showWizardModal, setShowWizardModal] = useState(false);
   const [selectedProject, setSelectedProject] = useState(null);
 
+  // Debug logging
+  console.log('App render - currentView:', currentView);
+  console.log('App render - selectedProject:', selectedProject);
+
   // Navigation handlers
   const handleNavigateToProject = (project) => {
+    console.log('handleNavigateToProject called with:', project);
     setSelectedProject(project);
     setCurrentView('materials'); // Default to materials dashboard
+    console.log('After setting - selectedProject should be:', project);
+    console.log('After setting - currentView should be: materials');
   };
 
   const handleCreateNewProject = () => {
+    console.log('handleCreateNewProject called');
     setShowWizardModal(true);
   };
 
   const handleWizardComplete = (newProject) => {
+    console.log('handleWizardComplete called with:', newProject);
     setSelectedProject(newProject);
     setShowWizardModal(false);
     setCurrentView('materials'); // Navigate to materials after project creation
   };
 
   const handleCloseWizard = () => {
+    console.log('handleCloseWizard called');
     setShowWizardModal(false);
   };
 
   const handleBackToLanding = () => {
+    console.log('handleBackToLanding called');
     setCurrentView('landing');
     setSelectedProject(null);
   };
 
   const handleViewChange = (view) => {
+    console.log('handleViewChange called with view:', view);
     setCurrentView(view);
   };
 
@@ -60,14 +72,14 @@ function App() {
       {selectedProject && (
         <div className="p-4 border-b border-gray-200">
           <h3 className="font-semibold text-gray-900 truncate">
-            {selectedProject.projectName || selectedProject.name}
+            {selectedProject.projectName || selectedProject.name || 'Unnamed Project'}
           </h3>
           <p className="text-sm text-gray-500">
             {selectedProject.structureType || selectedProject.structure_type || 'Marine Infrastructure Project'}
           </p>
-          {selectedProject.region && (
+          {(selectedProject.region || selectedProject.country) && (
             <p className="text-xs text-gray-400 mt-1">
-              {selectedProject.region}, {selectedProject.country}
+              {selectedProject.region && `${selectedProject.region}, `}{selectedProject.country}
             </p>
           )}
         </div>
@@ -201,11 +213,28 @@ function App() {
   };
 
   const getCurrentViewTitle = () => {
+    console.log('getCurrentViewTitle called - currentView:', currentView);
     switch (currentView) {
       case 'materials': return 'Materials Analysis';
       case 'ecological': return 'Ecological Impact';
       case 'compliance': return 'Compliance Dashboard';
       default: return 'Dashboard';
+    }
+  };
+
+  const renderDashboardContent = () => {
+    console.log('renderDashboardContent - currentView:', currentView);
+    console.log('renderDashboardContent - selectedProject:', selectedProject);
+    
+    switch (currentView) {
+      case 'materials':
+        return <MaterialsDashboard />;
+      case 'ecological':
+        return <EcologicalDashboard selectedProject={selectedProject} />;
+      case 'compliance':
+        return <ComplianceDashboard />;
+      default:
+        return <MaterialsDashboard />;
     }
   };
 
@@ -298,9 +327,7 @@ function App() {
                   {/* Dashboard Content with Error Boundaries */}
                   <main className="flex-1 overflow-auto bg-gray-50">
                     <ErrorBoundary>
-                      {currentView === 'materials' && <MaterialsDashboard />}
-                      {currentView === 'ecological' && <EcologicalDashboard />}
-                      {currentView === 'compliance' && <ComplianceDashboard />}
+                      {renderDashboardContent()}
                     </ErrorBoundary>
                   </main>
                 </div>

@@ -1,4 +1,3 @@
-# [Copy the entire ComplianceContext.js content from the artifact above]
 // frontend/src/context/ComplianceContext.js
 import React, { createContext, useContext, useReducer, useCallback } from 'react';
 import { complianceEnhancedAPI, healthAPI } from '../services/api';
