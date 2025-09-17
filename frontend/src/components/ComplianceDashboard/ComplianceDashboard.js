@@ -1,14 +1,14 @@
-// frontend/src/components/ComplianceDashboard/ComplianceDashboard.js
-import React, { useState, useEffect } from 'react';
+// frontend/src/components/ComplianceDashboard/ComplianceDashboard.js - SIMPLE STABLE
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useProject } from '../../context/ProjectContext';
 import { useCompliance } from '../../context/ComplianceContext';
 import ComplianceMap from './ComplianceMap';
 import ComplianceChecklist from './ComplianceChecklist';
 import RiskSummaryCards from './RiskSummaryCards';
 import ProjectSelector from './ProjectSelector';
+import ErrorAlert from '../common/ErrorAlert';
 import { 
   Shield, 
-  AlertTriangle, 
   Clock, 
   FileText, 
   Download, 
@@ -20,10 +20,10 @@ import {
 
 const ComplianceDashboard = () => {
   const { state: projectState } = useProject();
-  const { 
-    isLoading, 
-    error, 
-    currentAnalysis, 
+  const {
+    isLoading,
+    error,
+    currentAnalysis,
     enhancedFeaturesAvailable,
     checkSystemStatus,
     checkCompliance,
@@ -34,29 +34,24 @@ const ComplianceDashboard = () => {
   const [selectedProject, setSelectedProject] = useState(null);
   const [manualCoordinates, setManualCoordinates] = useState({ lat: '', lon: '' });
   const [projectType, setProjectType] = useState('breakwater');
-  const [analysisMode, setAnalysisMode] = useState('project'); // 'project' or 'manual'
+  const [analysisMode, setAnalysisMode] = useState('project');
 
-  // Check system status on mount
+  // Initialize system status once
   useEffect(() => {
-    checkSystemStatus().catch(console.error);
+    checkSystemStatus();
   }, [checkSystemStatus]);
 
-  // Auto-select first project if available
+  // Auto-select first project
   useEffect(() => {
     if (!selectedProject && projectState.activeProjects?.length > 0) {
       setSelectedProject(projectState.activeProjects[0]);
     }
   }, [projectState.activeProjects, selectedProject]);
 
-  // Auto-analyze when project is selected
-  useEffect(() => {
-    if (selectedProject && analysisMode === 'project') {
-      handleAnalyzeProject(selectedProject);
-    }
-  }, [selectedProject, analysisMode]);
-
-  const handleAnalyzeProject = async (project) => {
+  // Analyze project when selected
+  const handleAnalyzeProject = useCallback(async (project) => {
     if (!project?.lat || !project?.lon || !project?.structure_type) {
+      console.warn('Project missing required fields');
       return;
     }
 
@@ -68,21 +63,23 @@ const ComplianceDashboard = () => {
         projectId: project.id
       });
     } catch (error) {
-      console.error('Failed to analyze project compliance:', error);
+      console.error('Analysis failed:', error);
     }
-  };
+  }, [checkCompliance]);
 
-  const handleManualAnalysis = async () => {
+  // Auto-analyze when project changes
+  useEffect(() => {
+    if (selectedProject && analysisMode === 'project') {
+      handleAnalyzeProject(selectedProject);
+    }
+  }, [selectedProject, analysisMode, handleAnalyzeProject]);
+
+  const handleManualAnalysis = useCallback(async () => {
     const lat = parseFloat(manualCoordinates.lat);
     const lon = parseFloat(manualCoordinates.lon);
 
-    if (isNaN(lat) || isNaN(lon)) {
+    if (isNaN(lat) || isNaN(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
       alert('Please enter valid coordinates');
-      return;
-    }
-
-    if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
-      alert('Please enter valid coordinate ranges (lat: -90 to 90, lon: -180 to 180)');
       return;
     }
 
@@ -94,17 +91,30 @@ const ComplianceDashboard = () => {
         projectId: null
       });
     } catch (error) {
-      console.error('Failed to analyze manual coordinates:', error);
+      console.error('Analysis failed:', error);
     }
-  };
+  }, [manualCoordinates.lat, manualCoordinates.lon, projectType, checkCompliance]);
 
-  const refreshAnalysis = () => {
+  const refreshAnalysis = useCallback(() => {
     if (analysisMode === 'project' && selectedProject) {
       handleAnalyzeProject(selectedProject);
     } else if (analysisMode === 'manual') {
       handleManualAnalysis();
     }
-  };
+  }, [analysisMode, selectedProject, handleAnalyzeProject, handleManualAnalysis]);
+
+  // Extract safe analysis data
+  const analysisData = useMemo(() => {
+    if (!currentAnalysis) return null;
+    
+    return {
+      rules: currentAnalysis.rules || [],
+      riskSummary: currentAnalysis.riskSummary || null,
+      recommendations: currentAnalysis.recommendations || [],
+      location: currentAnalysis.location || null,
+      deadlines: currentAnalysis.deadlines || []
+    };
+  }, [currentAnalysis]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -116,7 +126,6 @@ const ComplianceDashboard = () => {
               <h1 className="text-3xl font-bold mb-2">Compliance Command Center</h1>
               <p className="text-yellow-100">Regulatory oversight and risk management</p>
               
-              {/* System Status Indicator */}
               <div className="flex items-center space-x-4 mt-3">
                 <div className="flex items-center space-x-2">
                   {enhancedFeaturesAvailable ? (
@@ -132,11 +141,11 @@ const ComplianceDashboard = () => {
                   )}
                 </div>
                 
-                {currentAnalysis && (
+                {analysisData?.location && (
                   <div className="flex items-center space-x-2">
                     <MapPin size={16} className="text-yellow-200" />
                     <span className="text-sm text-yellow-200">
-                      {formatLocation(currentAnalysis.location)}
+                      {formatLocation(analysisData.location)}
                     </span>
                   </div>
                 )}
@@ -165,23 +174,11 @@ const ComplianceDashboard = () => {
         </div>
       </div>
 
-      {/* Error Display */}
-      {error && (
-        <div className="bg-red-50 border-l-4 border-red-400 p-4">
-          <div className="flex">
-            <AlertTriangle className="h-5 w-5 text-red-400" />
-            <div className="ml-3">
-              <p className="text-sm text-red-700">{error}</p>
-              <button
-                onClick={clearError}
-                className="text-sm text-red-600 underline hover:text-red-500 mt-1"
-              >
-                Dismiss
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ErrorAlert 
+        error={error} 
+        onDismiss={clearError}
+        contextName="Compliance Analysis"
+      />
 
       <div className="max-w-7xl mx-auto p-6">
         {/* Analysis Mode Toggle */}
@@ -212,8 +209,7 @@ const ComplianceDashboard = () => {
             </label>
           </div>
 
-          {/* Project Selection Mode */}
-          {analysisMode === 'project' && (
+          {analysisMode === 'project' ? (
             <div className="mt-4">
               <ProjectSelector
                 projects={projectState.activeProjects || []}
@@ -222,15 +218,10 @@ const ComplianceDashboard = () => {
                 isLoading={projectState.isLoading}
               />
             </div>
-          )}
-
-          {/* Manual Coordinates Mode */}
-          {analysisMode === 'manual' && (
+          ) : (
             <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Latitude
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Latitude</label>
                 <input
                   type="number"
                   step="any"
@@ -242,9 +233,7 @@ const ComplianceDashboard = () => {
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Longitude
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Longitude</label>
                 <input
                   type="number"
                   step="any"
@@ -256,9 +245,7 @@ const ComplianceDashboard = () => {
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Project Type
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Project Type</label>
                 <select
                   value={projectType}
                   onChange={(e) => setProjectType(e.target.value)}
@@ -292,54 +279,48 @@ const ComplianceDashboard = () => {
         )}
 
         {/* Analysis Results */}
-        {currentAnalysis && !isLoading && (
+        {analysisData && !isLoading && (
           <>
-            {/* Risk Summary Cards */}
             <RiskSummaryCards 
-              riskSummary={currentAnalysis.riskSummary}
-              location={currentAnalysis.location}
-              recommendations={currentAnalysis.recommendations}
+              riskSummary={analysisData.riskSummary}
+              location={analysisData.location}
+              recommendations={analysisData.recommendations}
             />
 
-            {/* Main Content Grid */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
-              {/* Map and Checklist */}
               <div className="lg:col-span-2 space-y-6">
                 <ComplianceMap 
-                  location={currentAnalysis.location}
-                  rules={currentAnalysis.rules}
+                  location={analysisData.location}
+                  rules={analysisData.rules}
                 />
                 
                 <ComplianceChecklist 
-                  rules={currentAnalysis.rules}
-                  deadlines={currentAnalysis.deadlines}
+                  rules={analysisData.rules}
+                  deadlines={analysisData.deadlines}
                 />
               </div>
 
-              {/* Sidebar */}
               <div className="space-y-6">
-                {/* Project Info */}
                 {selectedProject && analysisMode === 'project' && (
                   <div className="bg-white rounded-lg shadow-sm border p-4">
                     <h3 className="font-semibold text-gray-900 mb-3">Project Details</h3>
                     <div className="space-y-2 text-sm">
                       <div className="flex justify-between">
                         <span className="text-gray-600">Name:</span>
-                        <span className="font-medium">{selectedProject.name}</span>
+                        <span className="font-medium">{selectedProject.name || 'Unnamed Project'}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-600">Type:</span>
-                        <span className="font-medium">{selectedProject.structure_type}</span>
+                        <span className="font-medium">{selectedProject.structure_type || 'Unknown'}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-600">Location:</span>
-                        <span className="font-medium">{selectedProject.country}</span>
+                        <span className="font-medium">{selectedProject.country || 'Unknown'}</span>
                       </div>
                     </div>
                   </div>
                 )}
 
-                {/* Quick Actions */}
                 <div className="bg-white rounded-lg shadow-sm border p-4">
                   <h3 className="font-semibold text-gray-900 mb-3">Quick Actions</h3>
                   <div className="space-y-2">
@@ -363,7 +344,7 @@ const ComplianceDashboard = () => {
         )}
 
         {/* Empty State */}
-        {!currentAnalysis && !isLoading && (
+        {!analysisData && !isLoading && !error && (
           <div className="text-center py-12">
             <Shield size={48} className="mx-auto text-gray-300 mb-4" />
             <h3 className="text-lg font-semibold text-gray-600 mb-2">
