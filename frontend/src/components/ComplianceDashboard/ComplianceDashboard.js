@@ -1,4 +1,4 @@
-// frontend/src/components/ComplianceDashboard/ComplianceDashboard.js - SIMPLE STABLE
+// frontend/src/components/ComplianceDashboard/ComplianceDashboard.js - ENHANCED SAFETY
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useProject } from '../../context/ProjectContext';
 import { useCompliance } from '../../context/ComplianceContext';
@@ -48,22 +48,82 @@ const ComplianceDashboard = () => {
     }
   }, [projectState.activeProjects, selectedProject]);
 
+  // ENHANCED: Create completely safe analysis data with guaranteed structure
+  const safeAnalysisData = useMemo(() => {
+    if (!currentAnalysis) {
+      return {
+        rules: [],
+        riskSummary: {
+          overallRisk: 'Unknown',
+          totalPermits: 0,
+          highRiskItems: 0,
+          mediumRiskItems: 0,
+          lowRiskItems: 0
+        },
+        recommendations: [],
+        location: null,
+        deadlines: []
+      };
+    }
+    
+    // CRITICAL FIX: Ensure riskSummary has all required properties
+    const safRiskSummary = {
+      overallRisk: currentAnalysis.riskSummary?.overallRisk || 'Unknown',
+      totalPermits: Number(currentAnalysis.riskSummary?.totalPermits) || 0,
+      highRiskItems: Number(currentAnalysis.riskSummary?.highRiskItems) || 0,
+      mediumRiskItems: Number(currentAnalysis.riskSummary?.mediumRiskItems) || 0,
+      lowRiskItems: Number(currentAnalysis.riskSummary?.lowRiskItems) || 0,
+      // Additional safety properties that components might expect
+      compliance_score: Number(currentAnalysis.riskSummary?.compliance_score) || 0,
+      last_updated: currentAnalysis.riskSummary?.last_updated || null
+    };
+    
+    return {
+      rules: Array.isArray(currentAnalysis.rules) ? currentAnalysis.rules : [],
+      riskSummary: safRiskSummary,
+      recommendations: Array.isArray(currentAnalysis.recommendations) ? currentAnalysis.recommendations : [],
+      location: currentAnalysis.location || null,
+      deadlines: Array.isArray(currentAnalysis.deadlines) ? currentAnalysis.deadlines : []
+    };
+  }, [currentAnalysis]);
+
   // Analyze project when selected
   const handleAnalyzeProject = useCallback(async (project) => {
-    if (!project?.lat || !project?.lon || !project?.structure_type) {
-      console.warn('Project missing required fields');
+    // ENHANCED: More thorough validation before API call
+    if (!project) {
+      console.warn('No project provided for analysis');
+      return;
+    }
+
+    const lat = Number(project.lat || project.latitude);
+    const lon = Number(project.lon || project.longitude);
+    const structureType = project.structure_type || project.type;
+
+    if (!lat || !lon || isNaN(lat) || isNaN(lon)) {
+      console.warn('Project missing valid coordinates:', { lat, lon });
+      return;
+    }
+
+    if (!structureType) {
+      console.warn('Project missing structure type');
+      return;
+    }
+
+    if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+      console.warn('Invalid coordinate ranges:', { lat, lon });
       return;
     }
 
     try {
       await checkCompliance({
-        lat: project.lat,
-        lon: project.lon,
-        projectType: project.structure_type,
+        lat: lat,
+        lon: lon,
+        projectType: structureType,
         projectId: project.id
       });
     } catch (error) {
       console.error('Analysis failed:', error);
+      // Error is already handled by the context
     }
   }, [checkCompliance]);
 
@@ -75,11 +135,30 @@ const ComplianceDashboard = () => {
   }, [selectedProject, analysisMode, handleAnalyzeProject]);
 
   const handleManualAnalysis = useCallback(async () => {
-    const lat = parseFloat(manualCoordinates.lat);
-    const lon = parseFloat(manualCoordinates.lon);
+    // ENHANCED: Better input validation
+    const latStr = manualCoordinates.lat.trim();
+    const lonStr = manualCoordinates.lon.trim();
+    
+    if (!latStr || !lonStr) {
+      alert('Please enter both latitude and longitude coordinates');
+      return;
+    }
 
-    if (isNaN(lat) || isNaN(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
-      alert('Please enter valid coordinates');
+    const lat = parseFloat(latStr);
+    const lon = parseFloat(lonStr);
+
+    if (isNaN(lat) || isNaN(lon)) {
+      alert('Please enter valid numeric coordinates');
+      return;
+    }
+
+    if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+      alert('Coordinates out of valid range:\nLatitude: -90 to 90\nLongitude: -180 to 180');
+      return;
+    }
+
+    if (!projectType || projectType.trim().length === 0) {
+      alert('Please select a project type');
       return;
     }
 
@@ -87,11 +166,12 @@ const ComplianceDashboard = () => {
       await checkCompliance({
         lat,
         lon,
-        projectType,
+        projectType: projectType.trim(),
         projectId: null
       });
     } catch (error) {
-      console.error('Analysis failed:', error);
+      console.error('Manual analysis failed:', error);
+      // Error is already handled by the context
     }
   }, [manualCoordinates.lat, manualCoordinates.lon, projectType, checkCompliance]);
 
@@ -102,19 +182,6 @@ const ComplianceDashboard = () => {
       handleManualAnalysis();
     }
   }, [analysisMode, selectedProject, handleAnalyzeProject, handleManualAnalysis]);
-
-  // Extract safe analysis data
-  const analysisData = useMemo(() => {
-    if (!currentAnalysis) return null;
-    
-    return {
-      rules: currentAnalysis.rules || [],
-      riskSummary: currentAnalysis.riskSummary || null,
-      recommendations: currentAnalysis.recommendations || [],
-      location: currentAnalysis.location || null,
-      deadlines: currentAnalysis.deadlines || []
-    };
-  }, [currentAnalysis]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -141,11 +208,11 @@ const ComplianceDashboard = () => {
                   )}
                 </div>
                 
-                {analysisData?.location && (
+                {safeAnalysisData.location && (
                   <div className="flex items-center space-x-2">
                     <MapPin size={16} className="text-yellow-200" />
                     <span className="text-sm text-yellow-200">
-                      {formatLocation(analysisData.location)}
+                      {formatLocation(safeAnalysisData.location)}
                     </span>
                   </div>
                 )}
@@ -174,8 +241,9 @@ const ComplianceDashboard = () => {
         </div>
       </div>
 
+      {/* ENHANCED: Error display with both context errors */}
       <ErrorAlert 
-        error={error} 
+        error={error || projectState.error} 
         onDismiss={clearError}
         contextName="Compliance Analysis"
       />
@@ -254,6 +322,8 @@ const ComplianceDashboard = () => {
                   <option value="breakwater">Breakwater</option>
                   <option value="seawall">Seawall</option>
                   <option value="pier">Pier</option>
+                  <option value="jetty">Jetty</option>
+                  <option value="artificial-reef">Artificial Reef</option>
                 </select>
               </div>
               
@@ -263,7 +333,7 @@ const ComplianceDashboard = () => {
                   disabled={isLoading || !manualCoordinates.lat || !manualCoordinates.lon}
                   className="w-full px-4 py-2 bg-yellow-600 text-white rounded-md hover:bg-yellow-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
-                  Analyze
+                  {isLoading ? 'Analyzing...' : 'Analyze'}
                 </button>
               </div>
             </div>
@@ -278,25 +348,25 @@ const ComplianceDashboard = () => {
           </div>
         )}
 
-        {/* Analysis Results */}
-        {analysisData && !isLoading && (
+        {/* Analysis Results - SAFE: Always pass safe data structure */}
+        {currentAnalysis && !isLoading && (
           <>
             <RiskSummaryCards 
-              riskSummary={analysisData.riskSummary}
-              location={analysisData.location}
-              recommendations={analysisData.recommendations}
+              riskSummary={safeAnalysisData.riskSummary}
+              location={safeAnalysisData.location}
+              recommendations={safeAnalysisData.recommendations}
             />
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
               <div className="lg:col-span-2 space-y-6">
                 <ComplianceMap 
-                  location={analysisData.location}
-                  rules={analysisData.rules}
+                  location={safeAnalysisData.location}
+                  rules={safeAnalysisData.rules}
                 />
                 
                 <ComplianceChecklist 
-                  rules={analysisData.rules}
-                  deadlines={analysisData.deadlines}
+                  rules={safeAnalysisData.rules}
+                  deadlines={safeAnalysisData.deadlines}
                 />
               </div>
 
@@ -344,7 +414,7 @@ const ComplianceDashboard = () => {
         )}
 
         {/* Empty State */}
-        {!analysisData && !isLoading && !error && (
+        {!currentAnalysis && !isLoading && !error && (
           <div className="text-center py-12">
             <Shield size={48} className="mx-auto text-gray-300 mb-4" />
             <h3 className="text-lg font-semibold text-gray-600 mb-2">

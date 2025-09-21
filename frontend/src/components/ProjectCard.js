@@ -1,10 +1,11 @@
-// frontend/src/components/ProjectCard.js
-import React, { memo } from 'react';
+// frontend/src/components/ProjectCard.js - PERFORMANCE OPTIMIZED
+import React, { memo, useCallback, useMemo } from 'react';
 import { 
   MapPin, Calendar, Waves, Leaf, ArrowRight, Archive,
   ArchiveRestore, Trash2
 } from 'lucide-react';
 
+// PERFORMANCE: Memoized ProjectCard to prevent unnecessary re-renders
 const ProjectCard = memo(({
   project,
   isArchivedView,
@@ -21,20 +22,156 @@ const ProjectCard = memo(({
   const isSelected = selectedProjects.has(project.id);
   const isDeleting = deletingProjectId === project.id;
 
+  // PERFORMANCE: Memoized card click handler
+  const handleCardClick = useCallback(() => {
+    if (selectionMode) {
+      onToggleSelection(project.id, { stopPropagation: () => {} });
+    } else {
+      onSelectProject(project);
+    }
+  }, [selectionMode, onToggleSelection, onSelectProject, project]);
+
+  // PERFORMANCE: Memoized checkbox change handler
+  const handleCheckboxChange = useCallback((e) => {
+    onToggleSelection(project.id, e);
+  }, [onToggleSelection, project.id]);
+
+  // PERFORMANCE: Memoized action handlers to prevent recreation on every render
+  const handleArchive = useCallback((e) => {
+    onArchive(project, e);
+  }, [onArchive, project]);
+
+  const handleRestore = useCallback((e) => {
+    onRestore(project, e);
+  }, [onRestore, project]);
+
+  const handleDelete = useCallback((e) => {
+    onDeletePermanent(project, e);
+  }, [onDeletePermanent, project]);
+
+  const handleProjectView = useCallback((e) => {
+    e.stopPropagation();
+    onSelectProject(project);
+  }, [onSelectProject, project]);
+
+  // PERFORMANCE: Memoized computed values
+  const computedValues = useMemo(() => ({
+    projectName: project.name || `Project ${project.id}`,
+    projectType: project.type || 'Marine Infrastructure',
+    projectLocation: project.location || 'Location not specified',
+    formattedDate: formatDate(project.lastModified),
+    progressPercentage: project.progress || 0
+  }), [project, formatDate]);
+
+  // PERFORMANCE: Memoized CSS classes
+  const cardClasses = useMemo(() => {
+    let classes = "bg-white rounded-lg shadow-sm border hover:shadow-md transition-all cursor-pointer group relative";
+    
+    if (isSelected) {
+      classes += " ring-2 ring-blue-500 bg-blue-50";
+    }
+    
+    if (selectionMode) {
+      classes += " hover:ring-2 hover:ring-blue-300";
+    }
+    
+    return classes;
+  }, [isSelected, selectionMode]);
+
+  // PERFORMANCE: Memoized action buttons to prevent recreation
+  const actionButtons = useMemo(() => {
+    if (selectionMode) return null;
+
+    if (isArchivedView) {
+      return (
+        <div className="flex items-center space-x-4">
+          <button
+            onClick={handleRestore}
+            disabled={isDeleting}
+            className="flex items-center space-x-1 text-sm text-green-600 hover:text-green-700 disabled:opacity-50"
+          >
+            <ArchiveRestore size={14} />
+            <span>Restore</span>
+          </button>
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex items-center space-x-4">
+        <button
+          onClick={handleProjectView}
+          className="flex items-center space-x-1 text-sm text-blue-600 hover:text-blue-700"
+        >
+          <Waves size={14} />
+          <span>Ocean Data</span>
+        </button>
+        
+        <button
+          onClick={handleProjectView}
+          className="flex items-center space-x-1 text-sm text-green-600 hover:text-green-700"
+        >
+          <Leaf size={14} />
+          <span>Ecological</span>
+        </button>
+      </div>
+    );
+  }, [selectionMode, isArchivedView, handleRestore, handleProjectView, isDeleting]);
+
+  // PERFORMANCE: Memoized right-side actions
+  const rightActions = useMemo(() => (
+    <div className="flex items-center space-x-2">
+      {isArchivedView ? (
+        <button
+          onClick={handleDelete}
+          disabled={isDeleting}
+          className={`p-1 transition-colors ${
+            isDeleting 
+              ? 'text-gray-400 cursor-not-allowed' 
+              : 'text-gray-400 hover:text-red-500'
+          }`}
+          title="Delete permanently"
+        >
+          {isDeleting ? (
+            <div className="w-3.5 h-3.5 border border-gray-300 border-t-transparent rounded-full animate-spin" />
+          ) : (
+            <Trash2 size={14} />
+          )}
+        </button>
+      ) : (
+        <button
+          onClick={handleArchive}
+          disabled={isDeleting}
+          className={`p-1 transition-colors ${
+            isDeleting 
+              ? 'text-gray-400 cursor-not-allowed' 
+              : 'text-gray-400 hover:text-orange-500'
+          }`}
+          title="Archive project"
+        >
+          {isDeleting ? (
+            <div className="w-3.5 h-3.5 border border-gray-300 border-t-transparent rounded-full animate-spin" />
+          ) : (
+            <Archive size={14} />
+          )}
+        </button>
+      )}
+      
+      <ArrowRight size={16} className={`transition-colors ${
+        isArchivedView ? 'text-gray-300' : 'text-gray-400 group-hover:text-blue-600'
+      }`} />
+    </div>
+  ), [isArchivedView, handleDelete, handleArchive, isDeleting]);
+
   return (
-    <div
-      className={`bg-white rounded-lg shadow-sm border hover:shadow-md transition-all cursor-pointer group relative ${
-        isSelected ? 'ring-2 ring-blue-500 bg-blue-50' : ''
-      } ${selectionMode ? 'hover:ring-2 hover:ring-blue-300' : ''}`}
-      onClick={() => selectionMode ? onToggleSelection(project.id, { stopPropagation: () => {} }) : onSelectProject(project)}
-    >
+    <div className={cardClasses} onClick={handleCardClick}>
       {/* Selection Checkbox */}
       {selectionMode && (
         <div className="absolute top-4 left-4 z-10">
           <input
             type="checkbox"
             checked={isSelected}
-            onChange={(e) => onToggleSelection(project.id, e)}
+            onChange={handleCheckboxChange}
             className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500 focus:ring-2"
           />
         </div>
@@ -55,9 +192,9 @@ const ProjectCard = memo(({
         <div className="flex items-start justify-between mb-4">
           <div className="flex-1">
             <h3 className="text-lg font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">
-              {project.name || `Project ${project.id}`}
+              {computedValues.projectName}
             </h3>
-            <p className="text-sm text-gray-600 mt-1">{project.type}</p>
+            <p className="text-sm text-gray-600 mt-1">{computedValues.projectType}</p>
           </div>
         </div>
 
@@ -65,12 +202,12 @@ const ProjectCard = memo(({
         <div className="space-y-3">
           <div className="flex items-center space-x-2 text-sm text-gray-600">
             <MapPin size={14} />
-            <span>{project.location}</span>
+            <span>{computedValues.projectLocation}</span>
           </div>
           
           <div className="flex items-center space-x-2 text-sm text-gray-600">
             <Calendar size={14} />
-            <span>Modified {formatDate(project.lastModified)}</span>
+            <span>Modified {computedValues.formattedDate}</span>
           </div>
         </div>
 
@@ -79,12 +216,12 @@ const ProjectCard = memo(({
           <div className="mt-4">
             <div className="flex items-center justify-between text-sm mb-2">
               <span className="text-gray-600">Progress</span>
-              <span className="text-gray-900 font-medium">{project.progress}%</span>
+              <span className="text-gray-900 font-medium">{computedValues.progressPercentage}%</span>
             </div>
             <div className="w-full bg-gray-200 rounded-full h-2">
               <div 
                 className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                style={{ width: `${project.progress}%` }}
+                style={{ width: `${computedValues.progressPercentage}%` }}
               />
             </div>
           </div>
@@ -93,86 +230,8 @@ const ProjectCard = memo(({
         {/* Actions */}
         {!selectionMode && (
           <div className="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between">
-            {isArchivedView ? (
-              // Archived project actions
-              <div className="flex items-center space-x-4">
-                <button
-                  onClick={(e) => onRestore(project, e)}
-                  disabled={isDeleting}
-                  className="flex items-center space-x-1 text-sm text-green-600 hover:text-green-700 disabled:opacity-50"
-                >
-                  <ArchiveRestore size={14} />
-                  <span>Restore</span>
-                </button>
-              </div>
-            ) : (
-              // Active project actions
-              <div className="flex items-center space-x-4">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onSelectProject(project);
-                  }}
-                  className="flex items-center space-x-1 text-sm text-blue-600 hover:text-blue-700"
-                >
-                  <Waves size={14} />
-                  <span>Ocean Data</span>
-                </button>
-                
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onSelectProject(project);
-                  }}
-                  className="flex items-center space-x-1 text-sm text-green-600 hover:text-green-700"
-                >
-                  <Leaf size={14} />
-                  <span>Ecological</span>
-                </button>
-              </div>
-            )}
-
-            <div className="flex items-center space-x-2">
-              {isArchivedView ? (
-                <button
-                  onClick={(e) => onDeletePermanent(project, e)}
-                  disabled={isDeleting}
-                  className={`p-1 transition-colors ${
-                    isDeleting 
-                      ? 'text-gray-400 cursor-not-allowed' 
-                      : 'text-gray-400 hover:text-red-500'
-                  }`}
-                  title="Delete permanently"
-                >
-                  {isDeleting ? (
-                    <div className="w-3.5 h-3.5 border border-gray-300 border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    <Trash2 size={14} />
-                  )}
-                </button>
-              ) : (
-                <button
-                  onClick={(e) => onArchive(project, e)}
-                  disabled={isDeleting}
-                  className={`p-1 transition-colors ${
-                    isDeleting 
-                      ? 'text-gray-400 cursor-not-allowed' 
-                      : 'text-gray-400 hover:text-orange-500'
-                  }`}
-                  title="Archive project"
-                >
-                  {isDeleting ? (
-                    <div className="w-3.5 h-3.5 border border-gray-300 border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    <Archive size={14} />
-                  )}
-                </button>
-              )}
-              
-              <ArrowRight size={16} className={`transition-colors ${
-                isArchivedView ? 'text-gray-300' : 'text-gray-400 group-hover:text-blue-600'
-              }`} />
-            </div>
+            {actionButtons}
+            {rightActions}
           </div>
         )}
       </div>

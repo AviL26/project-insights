@@ -1,4 +1,4 @@
-// frontend/src/context/ProjectContext.js - FIXED
+// frontend/src/context/ProjectContext.js - ENHANCED BULK OPERATIONS SAFETY
 import React, { createContext, useContext, useReducer, useEffect } from 'react';
 import { projectsAPI } from '../services/api';
 import { ensureProjectDefaults, ensureProjectsDefaults, prepareProjectForAPI, validateProjectData } from '../utils/projectUtils';
@@ -12,16 +12,22 @@ const initialState = {
   currentView: 'active',
   isLoading: false,
   error: null,
-  validationErrors: null // NEW: Track validation errors separately
+  validationErrors: null, 
+  operationInProgress: false, // Track ongoing operations
+  lastOperation: null // Track last operation for retry
 };
 
 const projectReducer = (state, action) => {
   switch (action.type) {
     case 'SET_LOADING':
       return { ...state, isLoading: action.payload, error: null };
+    case 'SET_OPERATION_IN_PROGRESS':
+      return { ...state, operationInProgress: action.payload };
+    case 'SET_LAST_OPERATION':
+      return { ...state, lastOperation: action.payload };
     case 'SET_ERROR':
-      return { ...state, error: action.payload, isLoading: false };
-    case 'SET_VALIDATION_ERROR': // NEW
+      return { ...state, error: action.payload, isLoading: false, operationInProgress: false };
+    case 'SET_VALIDATION_ERROR':
       return { ...state, validationErrors: action.payload, isLoading: false };
     case 'CLEAR_ERROR':
       return { ...state, error: null, validationErrors: null };
@@ -80,27 +86,41 @@ const projectReducer = (state, action) => {
         error: null
       };
     case 'BULK_ARCHIVE_PROJECTS':
-      // FIXED: Validate project IDs exist
-      const validProjectIds = action.payload.filter(id => 
-        state.activeProjects.some(p => p.id === id)
-      );
+      // ENHANCED: More robust validation and error handling
+      const { validIds, invalidIds, totalRequested } = action.payload;
       
-      if (validProjectIds.length === 0) {
-        return { ...state, error: 'No valid projects found to archive' };
+      if (validIds.length === 0) {
+        return { 
+          ...state, 
+          error: `Cannot archive projects: ${invalidIds.length > 0 ? 'Invalid project IDs provided' : 'No projects selected'}`,
+          operationInProgress: false
+        };
       }
       
-      const projectsToArchive = state.activeProjects.filter(p => validProjectIds.includes(p.id));
-      const remainingActive = state.activeProjects.filter(p => !validProjectIds.includes(p.id));
+      const projectsToArchive = state.activeProjects.filter(p => validIds.includes(p.id));
+      const remainingActive = state.activeProjects.filter(p => !validIds.includes(p.id));
       const newlyArchived = projectsToArchive.map(p => 
         ensureProjectDefaults({ ...p, status: 'archived' })
       );
+      
+      const warningMessage = invalidIds.length > 0 
+        ? ` (${invalidIds.length} invalid IDs were skipped)`
+        : '';
       
       return {
         ...state,
         activeProjects: remainingActive,
         archivedProjects: [...newlyArchived, ...state.archivedProjects],
-        currentProject: validProjectIds.includes(state.currentProject?.id) ? null : state.currentProject,
-        error: null
+        currentProject: validIds.includes(state.currentProject?.id) ? null : state.currentProject,
+        error: null,
+        operationInProgress: false,
+        // Store operation result for user feedback
+        lastOperationResult: {
+          type: 'bulk_archive',
+          successCount: validIds.length,
+          totalRequested,
+          message: `Successfully archived ${validIds.length} project${validIds.length !== 1 ? 's' : ''}${warningMessage}`
+        }
       };
     case 'DELETE_PROJECT_PERMANENT':
       return {
@@ -111,22 +131,34 @@ const projectReducer = (state, action) => {
         error: null
       };
     case 'BULK_DELETE_PERMANENT':
-      // FIXED: Validate project IDs exist
-      const validDeleteIds = action.payload.filter(id => 
-        state.activeProjects.some(p => p.id === id) || 
-        state.archivedProjects.some(p => p.id === id)
-      );
+      // ENHANCED: Similar validation as bulk archive
+      const { validIds: validDeleteIds, invalidIds: invalidDeleteIds, totalRequested: totalDeleteRequested } = action.payload;
       
       if (validDeleteIds.length === 0) {
-        return { ...state, error: 'No valid projects found to delete' };
+        return { 
+          ...state, 
+          error: `Cannot delete projects: ${invalidDeleteIds.length > 0 ? 'Invalid project IDs provided' : 'No projects selected'}`,
+          operationInProgress: false
+        };
       }
+      
+      const deleteWarningMessage = invalidDeleteIds.length > 0 
+        ? ` (${invalidDeleteIds.length} invalid IDs were skipped)`
+        : '';
       
       return {
         ...state,
         activeProjects: state.activeProjects.filter(p => !validDeleteIds.includes(p.id)),
         archivedProjects: state.archivedProjects.filter(p => !validDeleteIds.includes(p.id)),
         currentProject: validDeleteIds.includes(state.currentProject?.id) ? null : state.currentProject,
-        error: null
+        error: null,
+        operationInProgress: false,
+        lastOperationResult: {
+          type: 'bulk_delete',
+          successCount: validDeleteIds.length,
+          totalRequested: totalDeleteRequested,
+          message: `Permanently deleted ${validDeleteIds.length} project${validDeleteIds.length !== 1 ? 's' : ''}${deleteWarningMessage}`
+        }
       };
     case 'UPDATE_PROJECT':
       const updatedProject = ensureProjectDefaults(action.payload);
@@ -145,12 +177,14 @@ const projectReducer = (state, action) => {
         error: null,
         validationErrors: null
       };
+    case 'CLEAR_OPERATION_RESULT':
+      return { ...state, lastOperationResult: null };
     default:
       return state;
   }
 };
 
-// FIXED: Deep clone utility for state backup
+// ENHANCED: Deep clone utility for state backup
 const deepClone = (obj) => {
   if (obj === null || typeof obj !== 'object') return obj;
   if (obj instanceof Date) return new Date(obj);
@@ -159,6 +193,46 @@ const deepClone = (obj) => {
     clone[key] = deepClone(obj[key]);
     return clone;
   }, {});
+};
+
+// ENHANCED: Validation utilities for bulk operations
+const validateProjectIds = (projectIds, availableProjects, operationType = 'operation') => {
+  // Input validation
+  if (!Array.isArray(projectIds)) {
+    throw new Error(`Project IDs must be an array for ${operationType}`);
+  }
+
+  if (projectIds.length === 0) {
+    throw new Error(`No projects selected for ${operationType}`);
+  }
+
+  // ENHANCED: Validate each ID and categorize
+  const validIds = [];
+  const invalidIds = [];
+  
+  projectIds.forEach(id => {
+    // Check if ID is valid (number or string that can be converted to number)
+    const numericId = Number(id);
+    if (isNaN(numericId) || numericId <= 0) {
+      invalidIds.push(id);
+      return;
+    }
+    
+    // Check if project exists in available projects
+    const projectExists = availableProjects.some(p => Number(p.id) === numericId);
+    if (projectExists) {
+      validIds.push(numericId);
+    } else {
+      invalidIds.push(id);
+    }
+  });
+
+  return {
+    validIds,
+    invalidIds,
+    totalRequested: projectIds.length,
+    isValid: validIds.length > 0
+  };
 };
 
 export const ProjectProvider = ({ children }) => {
@@ -198,9 +272,9 @@ export const ProjectProvider = ({ children }) => {
     dispatch({ type: 'SET_CURRENT_VIEW', payload: view });
   };
 
-  // FIXED: Enhanced validation before API calls
+  // ENHANCED: Create project with comprehensive validation
   const createProject = async (projectData) => {
-    // Validate input before processing
+    // CRITICAL: Always validate input data
     const validation = validateProjectData(projectData);
     if (!validation.isValid) {
       dispatch({ 
@@ -214,12 +288,26 @@ export const ProjectProvider = ({ children }) => {
     }
 
     dispatch({ type: 'SET_LOADING', payload: true });
+    dispatch({ type: 'SET_OPERATION_IN_PROGRESS', payload: true });
+    dispatch({ type: 'SET_LAST_OPERATION', payload: { type: 'create', data: projectData } });
     
     // Create state backup for potential rollback
     const stateBackup = deepClone(state);
     
     try {
+      // CRITICAL: Always use prepareProjectForAPI to ensure proper formatting
       const preparedData = prepareProjectForAPI(projectData);
+      
+      if (!preparedData) {
+        throw new Error('Failed to prepare project data for API submission');
+      }
+      
+      // Final validation on prepared data
+      const preparedValidation = validateProjectData(preparedData);
+      if (!preparedValidation.isValid) {
+        throw new Error(`Prepared data validation failed: ${preparedValidation.errors.join(', ')}`);
+      }
+      
       const response = await projectsAPI.create(preparedData);
 
       const newProject = response.data?.data || response.data;
@@ -232,22 +320,140 @@ export const ProjectProvider = ({ children }) => {
       const errorMessage = error.response?.data?.error || error.message || 'Failed to create project';
       dispatch({ type: 'SET_ERROR', payload: errorMessage });
       throw new Error(errorMessage);
+    } finally {
+      dispatch({ type: 'SET_OPERATION_IN_PROGRESS', payload: false });
     }
   };
 
+  // ENHANCED: Bulk archive with comprehensive validation
+  const bulkArchiveProjects = async (projectIds) => {
+    dispatch({ type: 'SET_OPERATION_IN_PROGRESS', payload: true });
+    dispatch({ type: 'SET_LAST_OPERATION', payload: { type: 'bulk_archive', data: projectIds } });
+    
+    try {
+      // CRITICAL: Validate inputs before processing
+      const validation = validateProjectIds(projectIds, state.activeProjects, 'bulk archive');
+      
+      if (!validation.isValid) {
+        dispatch({ 
+          type: 'SET_ERROR', 
+          payload: validation.invalidIds.length > 0 
+            ? `Invalid project IDs: ${validation.invalidIds.join(', ')}`
+            : 'No valid projects found to archive'
+        });
+        throw new Error('Bulk archive validation failed');
+      }
+
+      const stateBackup = deepClone(state);
+      
+      // Optimistic update
+      dispatch({ 
+        type: 'BULK_ARCHIVE_PROJECTS', 
+        payload: validation
+      });
+      
+      try {
+        const response = await projectsAPI.bulkArchive(validation.validIds);
+        
+        if (!response.data?.success) {
+          throw new Error(response.data?.error || 'Failed to archive projects');
+        }
+        
+        return {
+          archivedCount: response.data.data.archivedCount || validation.validIds.length,
+          archivedProjects: response.data.data.archivedProjects || [],
+          skippedCount: validation.invalidIds.length,
+          totalRequested: validation.totalRequested
+        };
+      } catch (apiError) {
+        // FIXED: Complete state rollback on API failure
+        dispatch({ type: 'SET_ACTIVE_PROJECTS', payload: stateBackup.activeProjects });
+        dispatch({ type: 'SET_ARCHIVED_PROJECTS', payload: stateBackup.archivedProjects });
+        dispatch({ type: 'SET_CURRENT_PROJECT', payload: stateBackup.currentProject });
+        throw apiError;
+      }
+    } catch (error) {
+      const errorMessage = error.response?.data?.error || error.message || 'Failed to archive projects';
+      dispatch({ type: 'SET_ERROR', payload: errorMessage });
+      throw new Error(errorMessage);
+    } finally {
+      dispatch({ type: 'SET_OPERATION_IN_PROGRESS', payload: false });
+    }
+  };
+
+  // ENHANCED: Bulk delete with comprehensive validation
+  const bulkDeletePermanent = async (projectIds) => {
+    dispatch({ type: 'SET_OPERATION_IN_PROGRESS', payload: true });
+    dispatch({ type: 'SET_LAST_OPERATION', payload: { type: 'bulk_delete', data: projectIds } });
+    
+    try {
+      // CRITICAL: Validate inputs - check both active and archived projects
+      const allProjects = [...state.activeProjects, ...state.archivedProjects];
+      const validation = validateProjectIds(projectIds, allProjects, 'bulk delete');
+      
+      if (!validation.isValid) {
+        dispatch({ 
+          type: 'SET_ERROR', 
+          payload: validation.invalidIds.length > 0 
+            ? `Invalid project IDs: ${validation.invalidIds.join(', ')}`
+            : 'No valid projects found to delete'
+        });
+        throw new Error('Bulk delete validation failed');
+      }
+
+      const stateBackup = deepClone(state);
+      
+      // Optimistic update
+      dispatch({ 
+        type: 'BULK_DELETE_PERMANENT', 
+        payload: validation
+      });
+      
+      try {
+        const response = await projectsAPI.bulkDeletePermanent(validation.validIds);
+        
+        if (!response.data?.success) {
+          throw new Error(response.data?.error || 'Failed to permanently delete projects');
+        }
+        
+        return {
+          deletedCount: response.data.data.deletedCount || validation.validIds.length,
+          deletedProjects: response.data.data.deletedProjects || [],
+          skippedCount: validation.invalidIds.length,
+          totalRequested: validation.totalRequested
+        };
+      } catch (apiError) {
+        // FIXED: Complete state rollback on API failure
+        dispatch({ type: 'SET_ACTIVE_PROJECTS', payload: stateBackup.activeProjects });
+        dispatch({ type: 'SET_ARCHIVED_PROJECTS', payload: stateBackup.archivedProjects });
+        dispatch({ type: 'SET_CURRENT_PROJECT', payload: stateBackup.currentProject });
+        throw apiError;
+      }
+    } catch (error) {
+      const errorMessage = error.response?.data?.error || error.message || 'Failed to permanently delete projects';
+      dispatch({ type: 'SET_ERROR', payload: errorMessage });
+      throw new Error(errorMessage);
+    } finally {
+      dispatch({ type: 'SET_OPERATION_IN_PROGRESS', payload: false });
+    }
+  };
+
+  // ENHANCED: Archive single project with validation
   const archiveProject = async (projectId) => {
-    // FIXED: Validate project ID exists
-    if (!projectId || !state.activeProjects.some(p => p.id === projectId)) {
+    // CRITICAL: Validate project ID exists
+    const numericId = Number(projectId);
+    if (!projectId || isNaN(numericId) || !state.activeProjects.some(p => Number(p.id) === numericId)) {
       const errorMessage = 'Project not found or already archived';
       dispatch({ type: 'SET_ERROR', payload: errorMessage });
       throw new Error(errorMessage);
     }
 
+    dispatch({ type: 'SET_OPERATION_IN_PROGRESS', payload: true });
     const stateBackup = deepClone(state);
-    dispatch({ type: 'ARCHIVE_PROJECT', payload: { id: projectId } });
+    dispatch({ type: 'ARCHIVE_PROJECT', payload: { id: numericId } });
     
     try {
-      const response = await projectsAPI.archive(projectId);
+      const response = await projectsAPI.archive(numericId);
       
       if (!response.data?.success) {
         throw new Error(response.data?.error || 'Failed to archive project');
@@ -262,22 +468,26 @@ export const ProjectProvider = ({ children }) => {
       const errorMessage = error.response?.data?.error || error.message || 'Failed to archive project';
       dispatch({ type: 'SET_ERROR', payload: errorMessage });
       throw new Error(errorMessage);
+    } finally {
+      dispatch({ type: 'SET_OPERATION_IN_PROGRESS', payload: false });
     }
   };
 
+  // Continue with other methods following the same enhanced pattern...
   const restoreProject = async (projectId) => {
-    // FIXED: Validate project ID exists
-    if (!projectId || !state.archivedProjects.some(p => p.id === projectId)) {
+    const numericId = Number(projectId);
+    if (!projectId || isNaN(numericId) || !state.archivedProjects.some(p => Number(p.id) === numericId)) {
       const errorMessage = 'Project not found or not archived';
       dispatch({ type: 'SET_ERROR', payload: errorMessage });
       throw new Error(errorMessage);
     }
 
+    dispatch({ type: 'SET_OPERATION_IN_PROGRESS', payload: true });
     const stateBackup = deepClone(state);
-    dispatch({ type: 'RESTORE_PROJECT', payload: { id: projectId } });
+    dispatch({ type: 'RESTORE_PROJECT', payload: { id: numericId } });
     
     try {
-      const response = await projectsAPI.restore(projectId);
+      const response = await projectsAPI.restore(numericId);
       
       if (!response.data?.success) {
         throw new Error(response.data?.error || 'Failed to restore project');
@@ -285,32 +495,34 @@ export const ProjectProvider = ({ children }) => {
       
       return true;
     } catch (error) {
-      // FIXED: Complete state rollback
       dispatch({ type: 'SET_ACTIVE_PROJECTS', payload: stateBackup.activeProjects });
       dispatch({ type: 'SET_ARCHIVED_PROJECTS', payload: stateBackup.archivedProjects });
       
       const errorMessage = error.response?.data?.error || error.message || 'Failed to restore project';
       dispatch({ type: 'SET_ERROR', payload: errorMessage });
       throw new Error(errorMessage);
+    } finally {
+      dispatch({ type: 'SET_OPERATION_IN_PROGRESS', payload: false });
     }
   };
 
   const deleteProjectPermanent = async (projectId) => {
-    // FIXED: Validate project ID exists
-    const projectExists = state.activeProjects.some(p => p.id === projectId) || 
-                         state.archivedProjects.some(p => p.id === projectId);
+    const numericId = Number(projectId);
+    const projectExists = state.activeProjects.some(p => Number(p.id) === numericId) || 
+                         state.archivedProjects.some(p => Number(p.id) === numericId);
     
-    if (!projectId || !projectExists) {
+    if (!projectId || isNaN(numericId) || !projectExists) {
       const errorMessage = 'Project not found';
       dispatch({ type: 'SET_ERROR', payload: errorMessage });
       throw new Error(errorMessage);
     }
 
+    dispatch({ type: 'SET_OPERATION_IN_PROGRESS', payload: true });
     const stateBackup = deepClone(state);
-    dispatch({ type: 'DELETE_PROJECT_PERMANENT', payload: projectId });
+    dispatch({ type: 'DELETE_PROJECT_PERMANENT', payload: numericId });
     
     try {
-      const response = await projectsAPI.deletePermanent(projectId);
+      const response = await projectsAPI.deletePermanent(numericId);
       
       if (!response.data?.success) {
         throw new Error(response.data?.error || 'Failed to permanently delete project');
@@ -318,7 +530,6 @@ export const ProjectProvider = ({ children }) => {
       
       return true;
     } catch (error) {
-      // FIXED: Complete state rollback
       dispatch({ type: 'SET_ACTIVE_PROJECTS', payload: stateBackup.activeProjects });
       dispatch({ type: 'SET_ARCHIVED_PROJECTS', payload: stateBackup.archivedProjects });
       dispatch({ type: 'SET_CURRENT_PROJECT', payload: stateBackup.currentProject });
@@ -326,122 +537,18 @@ export const ProjectProvider = ({ children }) => {
       const errorMessage = error.response?.data?.error || error.message || 'Failed to permanently delete project';
       dispatch({ type: 'SET_ERROR', payload: errorMessage });
       throw new Error(errorMessage);
-    }
-  };
-
-  const bulkArchiveProjects = async (projectIds) => {
-    // FIXED: Enhanced validation
-    if (!Array.isArray(projectIds)) {
-      const errorMessage = 'Project IDs must be an array';
-      dispatch({ type: 'SET_ERROR', payload: errorMessage });
-      throw new Error(errorMessage);
-    }
-
-    if (projectIds.length === 0) {
-      const errorMessage = 'No projects selected for archiving';
-      dispatch({ type: 'SET_ERROR', payload: errorMessage });
-      throw new Error(errorMessage);
-    }
-
-    // Filter valid IDs
-    const validIds = projectIds.filter(id => 
-      id && state.activeProjects.some(p => p.id === id)
-    );
-
-    if (validIds.length === 0) {
-      const errorMessage = 'No valid projects found to archive';
-      dispatch({ type: 'SET_ERROR', payload: errorMessage });
-      throw new Error(errorMessage);
-    }
-
-    const stateBackup = deepClone(state);
-    dispatch({ type: 'BULK_ARCHIVE_PROJECTS', payload: validIds });
-    
-    try {
-      const response = await projectsAPI.bulkArchive(validIds);
-      
-      if (!response.data?.success) {
-        throw new Error(response.data?.error || 'Failed to archive projects');
-      }
-      
-      return {
-        archivedCount: response.data.data.archivedCount,
-        archivedProjects: response.data.data.archivedProjects,
-        skippedCount: projectIds.length - validIds.length
-      };
-    } catch (error) {
-      // FIXED: Complete state rollback
-      dispatch({ type: 'SET_ACTIVE_PROJECTS', payload: stateBackup.activeProjects });
-      dispatch({ type: 'SET_ARCHIVED_PROJECTS', payload: stateBackup.archivedProjects });
-      dispatch({ type: 'SET_CURRENT_PROJECT', payload: stateBackup.currentProject });
-      
-      const errorMessage = error.response?.data?.error || error.message || 'Failed to archive projects';
-      dispatch({ type: 'SET_ERROR', payload: errorMessage });
-      throw new Error(errorMessage);
-    }
-  };
-
-  const bulkDeletePermanent = async (projectIds) => {
-    // FIXED: Enhanced validation
-    if (!Array.isArray(projectIds)) {
-      const errorMessage = 'Project IDs must be an array';
-      dispatch({ type: 'SET_ERROR', payload: errorMessage });
-      throw new Error(errorMessage);
-    }
-
-    if (projectIds.length === 0) {
-      const errorMessage = 'No projects selected for deletion';
-      dispatch({ type: 'SET_ERROR', payload: errorMessage });
-      throw new Error(errorMessage);
-    }
-
-    // Filter valid IDs from both active and archived
-    const validIds = projectIds.filter(id => 
-      id && (state.activeProjects.some(p => p.id === id) || state.archivedProjects.some(p => p.id === id))
-    );
-
-    if (validIds.length === 0) {
-      const errorMessage = 'No valid projects found to delete';
-      dispatch({ type: 'SET_ERROR', payload: errorMessage });
-      throw new Error(errorMessage);
-    }
-
-    const stateBackup = deepClone(state);
-    dispatch({ type: 'BULK_DELETE_PERMANENT', payload: validIds });
-    
-    try {
-      const response = await projectsAPI.bulkDeletePermanent(validIds);
-      
-      if (!response.data?.success) {
-        throw new Error(response.data?.error || 'Failed to permanently delete projects');
-      }
-      
-      return {
-        deletedCount: response.data.data.deletedCount,
-        deletedProjects: response.data.data.deletedProjects,
-        skippedCount: projectIds.length - validIds.length
-      };
-    } catch (error) {
-      // FIXED: Complete state rollback
-      dispatch({ type: 'SET_ACTIVE_PROJECTS', payload: stateBackup.activeProjects });
-      dispatch({ type: 'SET_ARCHIVED_PROJECTS', payload: stateBackup.archivedProjects });
-      dispatch({ type: 'SET_CURRENT_PROJECT', payload: stateBackup.currentProject });
-      
-      const errorMessage = error.response?.data?.error || error.message || 'Failed to permanently delete projects';
-      dispatch({ type: 'SET_ERROR', payload: errorMessage });
-      throw new Error(errorMessage);
+    } finally {
+      dispatch({ type: 'SET_OPERATION_IN_PROGRESS', payload: false });
     }
   };
 
   const updateProject = async (updatedProject) => {
-    // FIXED: Validation and state backup
     if (!updatedProject || !updatedProject.id) {
       const errorMessage = 'Project ID is required for updates';
       dispatch({ type: 'SET_ERROR', payload: errorMessage });
       throw new Error(errorMessage);
     }
 
-    // Validate the updated data
     const validation = validateProjectData(updatedProject);
     if (!validation.isValid) {
       dispatch({ 
@@ -454,6 +561,7 @@ export const ProjectProvider = ({ children }) => {
       throw new Error(`Validation failed: ${validation.errors.join(', ')}`);
     }
 
+    dispatch({ type: 'SET_OPERATION_IN_PROGRESS', payload: true });
     const stateBackup = deepClone(state);
     
     try {
@@ -464,7 +572,6 @@ export const ProjectProvider = ({ children }) => {
       dispatch({ type: 'UPDATE_PROJECT', payload: updated });
       return updated;
     } catch (error) {
-      // FIXED: Complete state rollback
       dispatch({ type: 'SET_ACTIVE_PROJECTS', payload: stateBackup.activeProjects });
       dispatch({ type: 'SET_ARCHIVED_PROJECTS', payload: stateBackup.archivedProjects });
       dispatch({ type: 'SET_CURRENT_PROJECT', payload: stateBackup.currentProject });
@@ -472,6 +579,8 @@ export const ProjectProvider = ({ children }) => {
       const errorMessage = error.response?.data?.error || error.message || 'Failed to update project';
       dispatch({ type: 'SET_ERROR', payload: errorMessage });
       throw new Error(errorMessage);
+    } finally {
+      dispatch({ type: 'SET_OPERATION_IN_PROGRESS', payload: false });
     }
   };
 
@@ -481,6 +590,10 @@ export const ProjectProvider = ({ children }) => {
 
   const clearError = () => {
     dispatch({ type: 'CLEAR_ERROR' });
+  };
+
+  const clearOperationResult = () => {
+    dispatch({ type: 'CLEAR_OPERATION_RESULT' });
   };
 
   // Legacy compatibility methods
@@ -502,6 +615,7 @@ export const ProjectProvider = ({ children }) => {
       updateProject,
       setCurrentProject,
       clearError,
+      clearOperationResult,
       // Legacy methods for backward compatibility
       deleteProject,
       bulkDeleteProjects

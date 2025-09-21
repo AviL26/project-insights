@@ -1,8 +1,7 @@
-// frontend/src/components/ProjectSetup/ProjectSetupWizard.js - FIXED INFINITE RE-RENDER
-import React, { useState, useCallback, useMemo, useRef } from 'react';
+// frontend/src/components/ProjectSetup/ProjectSetupWizard.js - ENHANCED VALIDATION
+import React, { useState, useCallback, useMemo } from 'react';
 import { useProject } from '../../context/ProjectContext';
 import { validateProjectData, prepareProjectForAPI } from '../../utils/projectUtils';
-import { CoordinateInput, NumericInput } from '../common/ValidatedInput';
 import ErrorAlert from '../common/ErrorAlert';
 import { 
   ArrowRight, 
@@ -50,424 +49,376 @@ const SEABED_TYPES = [
   'mixed'
 ];
 
-const PRIMARY_GOALS = [
-  'Biodiversity Enhancement',
-  'Carbon Sequestration',
-  'Fish Habitat Creation',
-  'Coastal Protection',
-  'Wave Energy Reduction',
-  'Marine Research Platform',
-  'Aquaculture Support',
-  'Restoration of Natural Habitat',
-  'Tourism and Recreation',
-  'Water Quality Improvement'
-];
-
-const TARGET_SPECIES = [
-  'Mediterranean Grouper',
-  'Sea Bream',
-  'Sea Bass',
-  'Octopus',
-  'Lobster',
-  'Mussels',
-  'Oysters',
-  'Algae and Seaweed',
-  'Coral',
-  'Sponges',
-  'Various Fish Species',
-  'Crustaceans',
-  'Mollusks'
-];
-
-const HABITAT_TYPES = [
-  'Kelp/Algae Forests',
-  'Subtidal Rocky Reef',
-  'Filter Feeder Communities',
-  'Soft Sediment Habitat',
-  'Artificial Reef Structure',
-  'Nursery Habitat',
-  'Feeding Grounds',
-  'Spawning Areas',
-  'Mixed Habitat Complex'
-];
-
 const ProjectSetupWizard = ({ onComplete, isModal = false, onClose }) => {
   const { createProject } = useProject();
   
   const [currentStep, setCurrentStep] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState(null);
+  
+  // ENHANCED: Separate validation state tracking
   const [validationErrors, setValidationErrors] = useState({});
   const [validationWarnings, setValidationWarnings] = useState({});
+  const [stepValidation, setStepValidation] = useState({});
   
-  // Use ref to prevent validation from causing re-renders
-  const lastValidatedStep = useRef(-1);
-  const lastValidationData = useRef(null);
-  
-  // Form data state
+  // Form data with proper defaults
   const [formData, setFormData] = useState({
-    // Basic Information
     name: '',
     country: '',
     region: '',
     structure_type: '',
-    
-    // Location & Environment
-    lat: null,
-    lon: null,
-    coordinates: '',
-    water_depth: null,
+    lat: '',
+    lon: '',
+    length: '',
+    width: '',
+    height: '',
+    water_depth: '',
     wave_exposure: '',
     seabed_type: '',
-    water_temperature: '',
-    salinity: null,
-    
-    // Technical Specifications
-    length: null,
-    width: null,
-    height: null,
-    design_life: 50,
     primary_function: '',
-    
-    // Project Goals
-    regulatory_framework: [],
-    environmental_assessment: '',
-    permit_status: 'planning',
-    stakeholders: [],
+    design_life: '50',
     primary_goals: [],
+    regulatory_framework: [],
+    stakeholders: [],
     target_species: [],
-    habitat_types: [],
-    carbon_targets: null,
-    monitoring_plan: '',
-    other_species: ''
+    habitat_types: []
   });
 
-  // FIXED: Pure validation function that doesn't cause re-renders
-  const validateStep = useCallback((stepIndex, data) => {
-    const step = STEPS[stepIndex];
-    const errors = {};
-    const warnings = {};
+  // ENHANCED: Real-time validation with debouncing
+  const validateStep = useCallback((stepIndex, data = formData) => {
+    const stepConfig = STEPS[stepIndex];
+    const stepErrors = {};
+    const stepWarnings = {};
     
-    switch (step.id) {
+    switch (stepConfig.id) {
       case 'basic':
         if (!data.name?.trim()) {
-          errors.name = 'Project name is required';
-        } else if (data.name.length < 3) {
-          warnings.name = 'Project name is quite short';
+          stepErrors.name = 'Project name is required';
+        } else if (data.name.trim().length < 3) {
+          stepWarnings.name = 'Project name should be at least 3 characters';
         }
         
         if (!data.country?.trim()) {
-          errors.country = 'Country is required';
+          stepErrors.country = 'Country is required';
         }
         
-        if (!data.structure_type?.trim()) {
-          errors.structure_type = 'Structure type is required';
+        if (!data.structure_type) {
+          stepErrors.structure_type = 'Structure type is required';
         }
         break;
         
       case 'location':
-        // Only require either coordinates OR a description, not both
-        const hasCoordinates = (data.lat !== null && data.lat !== undefined) && 
-                              (data.lon !== null && data.lon !== undefined);
-        const hasLocationDescription = data.coordinates?.trim();
+        const lat = parseFloat(data.lat);
+        const lon = parseFloat(data.lon);
         
-        if (!hasCoordinates && !hasLocationDescription) {
-          errors.location = 'Please provide either coordinates or a location description';
+        if (!data.lat || isNaN(lat)) {
+          stepErrors.lat = 'Valid latitude is required';
+        } else if (lat < -90 || lat > 90) {
+          stepErrors.lat = 'Latitude must be between -90 and 90';
         }
         
-        // Validate coordinates if provided
-        if (data.lat !== null && data.lat !== undefined) {
-          if (data.lat < -90 || data.lat > 90) {
-            errors.lat = 'Latitude must be between -90 and 90 degrees';
-          }
+        if (!data.lon || isNaN(lon)) {
+          stepErrors.lon = 'Valid longitude is required';
+        } else if (lon < -180 || lon > 180) {
+          stepErrors.lon = 'Longitude must be between -180 and 180';
         }
         
-        if (data.lon !== null && data.lon !== undefined) {
-          if (data.lon < -180 || data.lon > 180) {
-            errors.lon = 'Longitude must be between -180 and 180 degrees';
-          }
-        }
-        
-        // Coordinate validation warnings
-        if (hasCoordinates && data.lat === 0 && data.lon === 0) {
-          warnings.coordinates = 'Coordinates appear to be default values (0,0) - please verify location';
-        }
-        
-        if (data.water_depth !== null && data.water_depth < 0) {
-          errors.water_depth = 'Water depth cannot be negative';
-        } else if (data.water_depth > 1000) {
-          warnings.water_depth = 'Unusually deep water - please verify';
-        }
-        
-        if (data.salinity !== null) {
-          if (data.salinity < 0 || data.salinity > 50) {
-            errors.salinity = 'Salinity must be between 0 and 50 PSU';
-          }
+        // Check if coordinates are likely in water
+        if (!isNaN(lat) && !isNaN(lon) && lat === 0 && lon === 0) {
+          stepWarnings.coordinates = 'Coordinates (0,0) may not be your intended location';
         }
         break;
         
       case 'technical':
-        if (data.length !== null && data.length <= 0) {
-          errors.length = 'Length must be greater than 0';
-        } else if (data.length > 10000) {
-          warnings.length = 'Extremely large structure - please verify dimensions';
+        const length = parseFloat(data.length);
+        const width = parseFloat(data.width);
+        const height = parseFloat(data.height);
+        const waterDepth = parseFloat(data.water_depth);
+        
+        if (data.length && isNaN(length)) {
+          stepErrors.length = 'Length must be a valid number';
+        } else if (length && (length <= 0 || length > 10000)) {
+          stepErrors.length = 'Length must be between 0 and 10,000 meters';
         }
         
-        if (data.width !== null && data.width <= 0) {
-          errors.width = 'Width must be greater than 0';
-        } else if (data.width > 10000) {
-          warnings.width = 'Extremely large structure - please verify dimensions';
+        if (data.width && isNaN(width)) {
+          stepErrors.width = 'Width must be a valid number';
+        } else if (width && (width <= 0 || width > 10000)) {
+          stepErrors.width = 'Width must be between 0 and 10,000 meters';
         }
         
-        if (data.height !== null && data.height <= 0) {
-          errors.height = 'Height must be greater than 0';
-        } else if (data.height > 1000) {
-          warnings.height = 'Extremely tall structure - please verify dimensions';
+        if (data.height && isNaN(height)) {
+          stepErrors.height = 'Height must be a valid number';
+        } else if (height && (height <= 0 || height > 1000)) {
+          stepErrors.height = 'Height must be between 0 and 1,000 meters';
         }
         
-        // Volume check
-        if (data.length && data.width && data.height) {
-          const volume = data.length * data.width * data.height;
+        if (data.water_depth && isNaN(waterDepth)) {
+          stepErrors.water_depth = 'Water depth must be a valid number';
+        } else if (waterDepth && (waterDepth < 0 || waterDepth > 12000)) {
+          stepErrors.water_depth = 'Water depth must be between 0 and 12,000 meters';
+        }
+        
+        // Business logic validation
+        if (length && width && height) {
+          const volume = length * width * height;
           if (volume > 1000000) {
-            warnings.dimensions = `Project volume (${volume.toLocaleString()}m³) is extremely large`;
-          } else if (volume < 0.1) {
-            warnings.dimensions = `Project volume (${volume}m³) is very small`;
+            stepWarnings.volume = `Large project volume (${volume.toLocaleString()}m³) - please verify dimensions`;
           }
-        }
-        
-        if (data.design_life < 1 || data.design_life > 200) {
-          errors.design_life = 'Design life must be between 1 and 200 years';
+          if (volume < 0.1) {
+            stepWarnings.volume = `Small project volume (${volume}m³) - please verify dimensions`;
+          }
         }
         break;
         
       case 'goals':
-        if (data.primary_goals.length === 0) {
-          warnings.primary_goals = 'Consider adding at least one project goal';
-        }
-        
-        if (data.carbon_targets !== null && data.carbon_targets < 0) {
-          errors.carbon_targets = 'Carbon targets cannot be negative';
+        if (data.primary_goals?.length === 0) {
+          stepWarnings.primary_goals = 'Consider selecting at least one primary goal';
         }
         break;
         
       case 'review':
-        // Final comprehensive validation
+        // Full validation for final review
         const fullValidation = validateProjectData(data);
         if (!fullValidation.isValid) {
-          Object.assign(errors, fullValidation.errors);
+          fullValidation.errors.forEach((error, index) => {
+            stepErrors[`validation_${index}`] = error;
+          });
         }
-        if (fullValidation.warnings) {
-          Object.assign(warnings, fullValidation.warnings);
+        if (fullValidation.warnings?.length > 0) {
+          fullValidation.warnings.forEach((warning, index) => {
+            stepWarnings[`validation_${index}`] = warning;
+          });
         }
         break;
         
       default:
+        // No specific validation for unknown steps
         break;
     }
     
-    return {
-      isValid: Object.keys(errors).length === 0,
-      hasWarnings: Object.keys(warnings).length > 0,
-      errors,
-      warnings
-    };
-  }, []); // Pure function - no dependencies needed
-
-  // FIXED: Only validate when explicitly requested, not on every render
-  const validateCurrentStep = useCallback((stepIndex = currentStep) => {
-    // Only validate if we haven't already validated this step with this data
-    const dataKey = JSON.stringify(formData);
-    if (lastValidatedStep.current === stepIndex && lastValidationData.current === dataKey) {
-      return {
-        isValid: Object.keys(validationErrors).length === 0,
-        hasWarnings: Object.keys(validationWarnings).length > 0,
-        errors: validationErrors,
-        warnings: validationWarnings
-      };
-    }
-
-    const validation = validateStep(stepIndex, formData);
+    const isValid = Object.keys(stepErrors).length === 0;
     
-    // Update validation state only if different
-    if (JSON.stringify(validation.errors) !== JSON.stringify(validationErrors)) {
-      setValidationErrors(validation.errors);
-    }
-    if (JSON.stringify(validation.warnings) !== JSON.stringify(validationWarnings)) {
-      setValidationWarnings(validation.warnings);
-    }
-    
-    // Cache this validation
-    lastValidatedStep.current = stepIndex;
-    lastValidationData.current = dataKey;
-    
-    return validation;
-  }, [currentStep, formData, validationErrors, validationWarnings, validateStep]);
-
-  // FIXED: Stable function that doesn't depend on validation state
-  const canProceedToStep = useCallback((targetStep) => {
-    if (targetStep <= currentStep) return true; // Can go backwards
-    
-    // Validate all steps up to target
-    for (let i = 0; i < targetStep; i++) {
-      const validation = validateStep(i, formData);
-      if (!validation.isValid) {
-        return false;
+    setStepValidation(prev => ({
+      ...prev,
+      [stepIndex]: {
+        isValid,
+        errors: stepErrors,
+        warnings: stepWarnings
       }
-    }
-    return true;
-  }, [currentStep, formData, validateStep]);
+    }));
+    
+    return { isValid, errors: stepErrors, warnings: stepWarnings };
+  }, [formData]);
 
-  const handleNext = useCallback(() => {
-    const validation = validateCurrentStep(currentStep);
+  // ENHANCED: Validate current step before proceeding
+  const canProceedToNextStep = useMemo(() => {
+    const currentValidation = stepValidation[currentStep];
+    return currentValidation?.isValid !== false; // Allow if not validated yet or if valid
+  }, [stepValidation, currentStep]);
+
+  const canSubmit = useMemo(() => {
+    // All steps must be valid for submission
+    const allStepsValid = STEPS.every((_, index) => {
+      const validation = stepValidation[index];
+      return validation?.isValid !== false;
+    });
+    
+    // Final validation check
+    const finalValidation = validateProjectData(formData);
+    return allStepsValid && finalValidation.isValid;
+  }, [stepValidation, formData]);
+
+  const handleInputChange = useCallback((field, value) => {
+    setFormData(prev => ({
+      ...prev,
+      [field]: value
+    }));
+    
+    // Clear field-specific errors when user starts typing
+    setValidationErrors(prev => {
+      const newErrors = { ...prev };
+      delete newErrors[field];
+      return newErrors;
+    });
+    
+    // Re-validate current step with new data
+    setTimeout(() => {
+      const newData = { ...formData, [field]: value };
+      validateStep(currentStep, newData);
+    }, 300); // Debounce validation
+  }, [formData, currentStep, validateStep]);
+
+  const handleArrayFieldChange = useCallback((field, values) => {
+    setFormData(prev => ({
+      ...prev,
+      [field]: Array.isArray(values) ? values : []
+    }));
+  }, []);
+
+  const handleNextStep = useCallback(() => {
+    // Validate current step before proceeding
+    const validation = validateStep(currentStep);
     
     if (!validation.isValid) {
-      // Show error and don't proceed
+      setValidationErrors(validation.errors);
+      setValidationWarnings(validation.warnings);
       return;
     }
     
-    if (validation.hasWarnings) {
-      // Show warnings but allow proceeding
-      console.warn('Step has warnings:', validation.warnings);
-    }
+    setValidationErrors({});
+    setValidationWarnings({});
     
     if (currentStep < STEPS.length - 1) {
-      setCurrentStep(prev => prev + 1);
-      // Clear validation for next step
-      lastValidatedStep.current = -1;
-      lastValidationData.current = null;
+      setCurrentStep(currentStep + 1);
+      // Pre-validate next step
+      setTimeout(() => validateStep(currentStep + 1), 100);
     }
-  }, [currentStep, validateCurrentStep]);
+  }, [currentStep, validateStep]);
 
-  const handlePrevious = useCallback(() => {
+  const handlePrevStep = useCallback(() => {
+    setValidationErrors({});
+    setValidationWarnings({});
+    
     if (currentStep > 0) {
-      setCurrentStep(prev => prev - 1);
-      setValidationErrors({});
-      setValidationWarnings({});
-      // Clear validation cache
-      lastValidatedStep.current = -1;
-      lastValidationData.current = null;
+      setCurrentStep(currentStep - 1);
     }
   }, [currentStep]);
 
-  const handleStepClick = useCallback((stepIndex) => {
-    if (canProceedToStep(stepIndex)) {
-      setCurrentStep(stepIndex);
-      // Clear validation cache when switching steps
-      lastValidatedStep.current = -1;
-      lastValidationData.current = null;
-    }
-  }, [canProceedToStep]);
-
-  const updateFormData = useCallback((field, value) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
-    
-    // Clear validation cache when data changes
-    lastValidatedStep.current = -1;
-    lastValidationData.current = null;
-    
-    // Clear validation errors for this field
-    if (validationErrors[field]) {
-      setValidationErrors(prev => {
-        const { [field]: removed, ...rest } = prev;
-        return rest;
-      });
-    }
-    if (validationWarnings[field]) {
-      setValidationWarnings(prev => {
-        const { [field]: removed, ...rest } = prev;
-        return rest;
-      });
-    }
-  }, [validationErrors, validationWarnings]);
-
-  // Multi-select handler for dropdown options
-  const handleMultiSelectChange = useCallback((field, selectedValue, optionsList) => {
-    const currentValues = formData[field] || [];
-    
-    if (currentValues.includes(selectedValue)) {
-      // Remove if already selected
-      const newValues = currentValues.filter(val => val !== selectedValue);
-      updateFormData(field, newValues);
-    } else {
-      // Add if not selected
-      const newValues = [...currentValues, selectedValue];
-      updateFormData(field, newValues);
-    }
-  }, [formData, updateFormData]);
-
+  // ENHANCED: Comprehensive submission validation
   const handleSubmit = useCallback(async () => {
-    // Final validation
-    const validation = validateCurrentStep(STEPS.length - 1);
-    
-    if (!validation.isValid) {
-      setSubmitError('Please fix all validation errors before submitting');
-      return;
-    }
-
-    setIsSubmitting(true);
     setSubmitError(null);
-
+    setIsSubmitting(true);
+    
     try {
-      // Prepare data for API
+      // CRITICAL: Validate before API submission
+      const validation = validateProjectData(formData);
+      
+      if (!validation.isValid) {
+        setValidationErrors({
+          submission: 'Please fix all validation errors before submitting',
+          ...validation.errors.reduce((acc, error, index) => {
+            acc[`error_${index}`] = error;
+            return acc;
+          }, {})
+        });
+        setIsSubmitting(false);
+        return;
+      }
+      
+      if (validation.warnings?.length > 0) {
+        setValidationWarnings({
+          ...validation.warnings.reduce((acc, warning, index) => {
+            acc[`warning_${index}`] = warning;
+            return acc;
+          }, {})
+        });
+      }
+      
+      // CRITICAL: Prepare data for API - this ensures proper formatting
       const preparedData = prepareProjectForAPI(formData);
       
-      // Create project
-      const createdProject = await createProject(preparedData);
-      
-      // Success
-      if (onComplete) {
-        onComplete(createdProject);
+      if (!preparedData) {
+        throw new Error('Failed to prepare project data for submission');
       }
+      
+      // CRITICAL: Final safety check on prepared data
+      const preparedValidation = validateProjectData(preparedData);
+      if (!preparedValidation.isValid) {
+        throw new Error(`Data preparation failed validation: ${preparedValidation.errors.join(', ')}`);
+      }
+      
+      console.log('Submitting project data:', preparedData);
+      
+      // Submit to API
+      const newProject = await createProject(preparedData);
+      
+      console.log('Project created successfully:', newProject);
+      
+      // Clear form and close
+      setFormData({
+        name: '',
+        country: '',
+        region: '',
+        structure_type: '',
+        lat: '',
+        lon: '',
+        length: '',
+        width: '',
+        height: '',
+        water_depth: '',
+        wave_exposure: '',
+        seabed_type: '',
+        primary_function: '',
+        design_life: '50',
+        primary_goals: [],
+        regulatory_framework: [],
+        stakeholders: [],
+        target_species: [],
+        habitat_types: []
+      });
+      
+      setValidationErrors({});
+      setValidationWarnings({});
+      setStepValidation({});
+      
+      onComplete?.(newProject);
       
     } catch (error) {
       console.error('Project creation failed:', error);
-      setSubmitError(error.message || 'Failed to create project');
+      setSubmitError(error.message || 'Failed to create project. Please check your data and try again.');
     } finally {
       setIsSubmitting(false);
     }
-  }, [formData, validateCurrentStep, createProject, onComplete]);
+  }, [formData, createProject, onComplete]);
 
-  // FIXED: Stable step content that doesn't recreate on every render
-  const stepContent = useMemo(() => {
-    const step = STEPS[currentStep];
+  // Render step content
+  const renderStepContent = () => {
+    const currentStepConfig = STEPS[currentStep];
+    const stepErrors = validationErrors;
+    const stepWarnings = validationWarnings;
     
-    switch (step.id) {
+    switch (currentStepConfig.id) {
       case 'basic':
         return (
           <div className="space-y-6">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Project Name <span className="text-red-500">*</span>
+                Project Name *
               </label>
               <input
                 type="text"
                 value={formData.name}
-                onChange={(e) => updateFormData('name', e.target.value)}
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Enter project name"
+                onChange={(e) => handleInputChange('name', e.target.value)}
+                className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                  stepErrors.name ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                }`}
+                placeholder="Enter project name..."
               />
-              {validationErrors.name && (
-                <p className="mt-1 text-sm text-red-600">{validationErrors.name}</p>
+              {stepErrors.name && (
+                <p className="mt-1 text-sm text-red-600">{stepErrors.name}</p>
               )}
-              {validationWarnings.name && (
-                <p className="mt-1 text-sm text-yellow-600">{validationWarnings.name}</p>
+              {stepWarnings.name && (
+                <p className="mt-1 text-sm text-orange-600">{stepWarnings.name}</p>
               )}
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Country <span className="text-red-500">*</span>
+                  Country *
                 </label>
                 <input
                   type="text"
                   value={formData.country}
-                  onChange={(e) => updateFormData('country', e.target.value)}
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="e.g., Cyprus, Israel, Greece"
+                  onChange={(e) => handleInputChange('country', e.target.value)}
+                  className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                    stepErrors.country ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                  }`}
+                  placeholder="e.g., Israel, Cyprus..."
                 />
-                {validationErrors.country && (
-                  <p className="mt-1 text-sm text-red-600">{validationErrors.country}</p>
+                {stepErrors.country && (
+                  <p className="mt-1 text-sm text-red-600">{stepErrors.country}</p>
                 )}
               </div>
 
@@ -478,29 +429,31 @@ const ProjectSetupWizard = ({ onComplete, isModal = false, onClose }) => {
                 <input
                   type="text"
                   value={formData.region}
-                  onChange={(e) => updateFormData('region', e.target.value)}
+                  onChange={(e) => handleInputChange('region', e.target.value)}
                   className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="e.g., Limassol, Haifa Bay"
+                  placeholder="e.g., Mediterranean Coast..."
                 />
               </div>
             </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Structure Type <span className="text-red-500">*</span>
+                Structure Type *
               </label>
               <select
                 value={formData.structure_type}
-                onChange={(e) => updateFormData('structure_type', e.target.value)}
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                onChange={(e) => handleInputChange('structure_type', e.target.value)}
+                className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                  stepErrors.structure_type ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                }`}
               >
-                <option value="">Select structure type</option>
+                <option value="">Select structure type...</option>
                 {STRUCTURE_TYPES.map(type => (
                   <option key={type} value={type}>{type}</option>
                 ))}
               </select>
-              {validationErrors.structure_type && (
-                <p className="mt-1 text-sm text-red-600">{validationErrors.structure_type}</p>
+              {stepErrors.structure_type && (
+                <p className="mt-1 text-sm text-red-600">{stepErrors.structure_type}</p>
               )}
             </div>
           </div>
@@ -509,84 +462,69 @@ const ProjectSetupWizard = ({ onComplete, isModal = false, onClose }) => {
       case 'location':
         return (
           <div className="space-y-6">
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-              <h4 className="text-sm font-medium text-blue-900 mb-1">Location Information</h4>
-              <p className="text-sm text-blue-700">
-                Provide either exact coordinates OR a descriptive location. Both are not required.
-              </p>
-            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Latitude * (decimal degrees)
+                </label>
+                <input
+                  type="number"
+                  step="any"
+                  value={formData.lat}
+                  onChange={(e) => handleInputChange('lat', e.target.value)}
+                  className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                    stepErrors.lat ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                  }`}
+                  placeholder="e.g., 32.0853"
+                />
+                {stepErrors.lat && (
+                  <p className="mt-1 text-sm text-red-600">{stepErrors.lat}</p>
+                )}
+              </div>
 
-            {validationErrors.location && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-                <p className="text-sm text-red-700">{validationErrors.location}</p>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Longitude * (decimal degrees)
+                </label>
+                <input
+                  type="number"
+                  step="any"
+                  value={formData.lon}
+                  onChange={(e) => handleInputChange('lon', e.target.value)}
+                  className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                    stepErrors.lon ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                  }`}
+                  placeholder="e.g., 34.7818"
+                />
+                {stepErrors.lon && (
+                  <p className="mt-1 text-sm text-red-600">{stepErrors.lon}</p>
+                )}
+              </div>
+            </div>
+            
+            {stepWarnings.coordinates && (
+              <div className="p-3 bg-orange-50 border border-orange-200 rounded-lg">
+                <div className="flex">
+                  <AlertTriangle size={16} className="text-orange-600 mt-0.5 mr-2" />
+                  <p className="text-sm text-orange-700">{stepWarnings.coordinates}</p>
+                </div>
               </div>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <CoordinateInput
-                coordinateType="latitude"
-                label="Latitude (Optional)"
-                value={formData.lat || ''}
-                onChange={(value) => updateFormData('lat', value)}
-                error={validationErrors.lat}
-              />
-
-              <CoordinateInput
-                coordinateType="longitude" 
-                label="Longitude (Optional)"
-                value={formData.lon || ''}
-                onChange={(value) => updateFormData('lon', value)}
-                error={validationErrors.lon}
-              />
-            </div>
-
-            {validationWarnings.coordinates && (
-              <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                <p className="text-sm text-yellow-700">{validationWarnings.coordinates}</p>
-              </div>
-            )}
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Location Description
-              </label>
-              <input
-                type="text"
-                value={formData.coordinates}
-                onChange={(e) => updateFormData('coordinates', e.target.value)}
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="e.g., 500m offshore from Limassol Marina, or Near Haifa Port entrance"
-              />
-              <p className="mt-1 text-sm text-gray-500">
-                If you don't have exact coordinates, describe the general location
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <NumericInput
-                label="Water Depth (m)"
-                value={formData.water_depth || ''}
-                onChange={(value) => updateFormData('water_depth', value)}
-                min={0}
-                max={12000}
-                error={validationErrors.water_depth}
-                warning={validationWarnings.water_depth}
-                helper="Depth of water at project location"
-              />
-
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Wave Exposure
                 </label>
                 <select
                   value={formData.wave_exposure}
-                  onChange={(e) => updateFormData('wave_exposure', e.target.value)}
+                  onChange={(e) => handleInputChange('wave_exposure', e.target.value)}
                   className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
-                  <option value="">Select exposure level</option>
-                  {WAVE_EXPOSURE_OPTIONS.map(exposure => (
-                    <option key={exposure} value={exposure}>
-                      {exposure.charAt(0).toUpperCase() + exposure.slice(1).replace('-', ' ')}
+                  <option value="">Select wave exposure...</option>
+                  {WAVE_EXPOSURE_OPTIONS.map(option => (
+                    <option key={option} value={option}>
+                      {option.charAt(0).toUpperCase() + option.slice(1).replace('-', ' ')}
                     </option>
                   ))}
                 </select>
@@ -598,10 +536,10 @@ const ProjectSetupWizard = ({ onComplete, isModal = false, onClose }) => {
                 </label>
                 <select
                   value={formData.seabed_type}
-                  onChange={(e) => updateFormData('seabed_type', e.target.value)}
+                  onChange={(e) => handleInputChange('seabed_type', e.target.value)}
                   className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
-                  <option value="">Select seabed type</option>
+                  <option value="">Select seabed type...</option>
                   {SEABED_TYPES.map(type => (
                     <option key={type} value={type}>
                       {type.charAt(0).toUpperCase() + type.slice(1)}
@@ -610,97 +548,116 @@ const ProjectSetupWizard = ({ onComplete, isModal = false, onClose }) => {
                 </select>
               </div>
             </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Water Temperature Range
-                </label>
-                <input
-                  type="text"
-                  value={formData.water_temperature}
-                  onChange={(e) => updateFormData('water_temperature', e.target.value)}
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="e.g., 18-28°C"
-                />
-              </div>
-
-              <NumericInput
-                label="Salinity (PSU)"
-                value={formData.salinity || ''}
-                onChange={(value) => updateFormData('salinity', value)}
-                min={0}
-                max={50}
-                step={0.1}
-                error={validationErrors.salinity}
-                helper="Practical Salinity Units"
-              />
-            </div>
           </div>
         );
 
       case 'technical':
         return (
           <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <NumericInput
-                label="Length (m)"
-                value={formData.length || ''}
-                onChange={(value) => updateFormData('length', value)}
-                min={0.1}
-                max={10000}
-                error={validationErrors.length}
-                warning={validationWarnings.length}
-              />
-
-              <NumericInput
-                label="Width (m)"
-                value={formData.width || ''}
-                onChange={(value) => updateFormData('width', value)}
-                min={0.1}
-                max={10000}
-                error={validationErrors.width}
-                warning={validationWarnings.width}
-              />
-
-              <NumericInput
-                label="Height (m)"
-                value={formData.height || ''}
-                onChange={(value) => updateFormData('height', value)}
-                min={0.1}
-                max={1000}
-                error={validationErrors.height}
-                warning={validationWarnings.height}
-              />
-            </div>
-
-            {validationWarnings.dimensions && (
-              <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                <p className="text-sm text-yellow-700">{validationWarnings.dimensions}</p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Length (meters)
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={formData.length}
+                  onChange={(e) => handleInputChange('length', e.target.value)}
+                  className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                    stepErrors.length ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                  }`}
+                  placeholder="e.g., 100"
+                />
+                {stepErrors.length && (
+                  <p className="mt-1 text-sm text-red-600">{stepErrors.length}</p>
+                )}
               </div>
-            )}
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <NumericInput
-                label="Design Life (years)"
-                value={formData.design_life || ''}
-                onChange={(value) => updateFormData('design_life', value)}
-                min={1}
-                max={200}
-                error={validationErrors.design_life}
-                helper="Expected operational lifespan"
-              />
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Primary Function
+                  Width (meters)
                 </label>
                 <input
-                  type="text"
-                  value={formData.primary_function}
-                  onChange={(e) => updateFormData('primary_function', e.target.value)}
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={formData.width}
+                  onChange={(e) => handleInputChange('width', e.target.value)}
+                  className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                    stepErrors.width ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                  }`}
+                  placeholder="e.g., 20"
+                />
+                {stepErrors.width && (
+                  <p className="mt-1 text-sm text-red-600">{stepErrors.width}</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Height (meters)
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={formData.height}
+                  onChange={(e) => handleInputChange('height', e.target.value)}
+                  className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                    stepErrors.height ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                  }`}
+                  placeholder="e.g., 5"
+                />
+                {stepErrors.height && (
+                  <p className="mt-1 text-sm text-red-600">{stepErrors.height}</p>
+                )}
+              </div>
+            </div>
+
+            {stepWarnings.volume && (
+              <div className="p-3 bg-orange-50 border border-orange-200 rounded-lg">
+                <div className="flex">
+                  <AlertTriangle size={16} className="text-orange-600 mt-0.5 mr-2" />
+                  <p className="text-sm text-orange-700">{stepWarnings.volume}</p>
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Water Depth (meters)
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={formData.water_depth}
+                  onChange={(e) => handleInputChange('water_depth', e.target.value)}
+                  className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                    stepErrors.water_depth ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                  }`}
+                  placeholder="e.g., 15"
+                />
+                {stepErrors.water_depth && (
+                  <p className="mt-1 text-sm text-red-600">{stepErrors.water_depth}</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Design Life (years)
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="200"
+                  value={formData.design_life}
+                  onChange={(e) => handleInputChange('design_life', e.target.value)}
                   className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="e.g., Coastal protection, Harbor infrastructure"
+                  placeholder="50"
                 />
               </div>
             </div>
@@ -712,116 +669,39 @@ const ProjectSetupWizard = ({ onComplete, isModal = false, onClose }) => {
           <div className="space-y-6">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-3">
-                Primary Goals
+                Primary Goals (select all that apply)
               </label>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {PRIMARY_GOALS.map(goal => (
+                {[
+                  'Coastal Protection',
+                  'Biodiversity Enhancement', 
+                  'Carbon Sequestration',
+                  'Fish Habitat Creation',
+                  'Coral Restoration',
+                  'Tourism Development',
+                  'Research Platform',
+                  'Commercial Infrastructure'
+                ].map(goal => (
                   <label key={goal} className="flex items-center space-x-3 p-3 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={formData.primary_goals.includes(goal)}
-                      onChange={() => handleMultiSelectChange('primary_goals', goal, PRIMARY_GOALS)}
-                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          handleArrayFieldChange('primary_goals', [...formData.primary_goals, goal]);
+                        } else {
+                          handleArrayFieldChange('primary_goals', formData.primary_goals.filter(g => g !== goal));
+                        }
+                      }}
+                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                     />
                     <span className="text-sm text-gray-700">{goal}</span>
                   </label>
                 ))}
               </div>
-              {validationWarnings.primary_goals && (
-                <p className="mt-2 text-sm text-yellow-600">{validationWarnings.primary_goals}</p>
+              {stepWarnings.primary_goals && (
+                <p className="mt-2 text-sm text-orange-600">{stepWarnings.primary_goals}</p>
               )}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-3">
-                Target Species
-              </label>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {TARGET_SPECIES.map(species => (
-                  <label key={species} className="flex items-center space-x-3 p-3 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={formData.target_species.includes(species)}
-                      onChange={() => handleMultiSelectChange('target_species', species, TARGET_SPECIES)}
-                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                    />
-                    <span className="text-sm text-gray-700">{species}</span>
-                  </label>
-                ))}
-              </div>
-              <div className="mt-3">
-                <label className="block text-sm font-medium text-gray-600 mb-2">
-                  Other Species (specify)
-                </label>
-                <input
-                  type="text"
-                  value={formData.other_species || ''}
-                  onChange={(e) => updateFormData('other_species', e.target.value)}
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="Enter any additional species not listed above"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-3">
-                Habitat Types
-              </label>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {HABITAT_TYPES.map(habitat => (
-                  <label key={habitat} className="flex items-center space-x-3 p-3 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={formData.habitat_types.includes(habitat)}
-                      onChange={() => handleMultiSelectChange('habitat_types', habitat, HABITAT_TYPES)}
-                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                    />
-                    <span className="text-sm text-gray-700">{habitat}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <NumericInput
-                label="Carbon Sequestration Target (tonnes/year)"
-                value={formData.carbon_targets || ''}
-                onChange={(value) => updateFormData('carbon_targets', value)}
-                min={0}
-                max={1000000}
-                error={validationErrors.carbon_targets}
-                helper="Expected carbon sequestration potential"
-              />
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Environmental Assessment Status
-                </label>
-                <select
-                  value={formData.environmental_assessment}
-                  onChange={(e) => updateFormData('environmental_assessment', e.target.value)}
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="">Select status</option>
-                  <option value="not-started">Not Started</option>
-                  <option value="in-progress">In Progress</option>
-                  <option value="completed">Completed</option>
-                  <option value="approved">Approved</option>
-                </select>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Monitoring Plan
-              </label>
-              <textarea
-                value={formData.monitoring_plan}
-                onChange={(e) => updateFormData('monitoring_plan', e.target.value)}
-                rows={4}
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Describe the planned monitoring approach for tracking ecological and structural performance..."
-              />
             </div>
           </div>
         );
@@ -829,206 +709,201 @@ const ProjectSetupWizard = ({ onComplete, isModal = false, onClose }) => {
       case 'review':
         return (
           <div className="space-y-6">
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-              <h3 className="text-lg font-semibold text-blue-900 mb-2">Project Summary</h3>
-              <p className="text-blue-800">Please review all information before creating the project.</p>
+            <div className="bg-gray-50 p-6 rounded-lg">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Project Summary</h3>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <h4 className="font-medium text-gray-900 mb-2">Basic Information</h4>
+                  <dl className="space-y-1 text-sm">
+                    <div className="flex justify-between">
+                      <dt className="text-gray-600">Name:</dt>
+                      <dd className="font-medium">{formData.name || 'Not specified'}</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-gray-600">Country:</dt>
+                      <dd className="font-medium">{formData.country || 'Not specified'}</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-gray-600">Type:</dt>
+                      <dd className="font-medium">{formData.structure_type || 'Not specified'}</dd>
+                    </div>
+                  </dl>
+                </div>
+
+                <div>
+                  <h4 className="font-medium text-gray-900 mb-2">Location & Technical</h4>
+                  <dl className="space-y-1 text-sm">
+                    <div className="flex justify-between">
+                      <dt className="text-gray-600">Coordinates:</dt>
+                      <dd className="font-medium">
+                        {formData.lat && formData.lon 
+                          ? `${parseFloat(formData.lat).toFixed(4)}°, ${parseFloat(formData.lon).toFixed(4)}°`
+                          : 'Not specified'
+                        }
+                      </dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-gray-600">Dimensions:</dt>
+                      <dd className="font-medium">
+                        {formData.length && formData.width && formData.height
+                          ? `${formData.length}×${formData.width}×${formData.height}m`
+                          : 'Not specified'
+                        }
+                      </dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-gray-600">Water Depth:</dt>
+                      <dd className="font-medium">{formData.water_depth ? `${formData.water_depth}m` : 'Not specified'}</dd>
+                    </div>
+                  </dl>
+                </div>
+              </div>
+
+              {formData.primary_goals.length > 0 && (
+                <div className="mt-4">
+                  <h4 className="font-medium text-gray-900 mb-2">Primary Goals</h4>
+                  <div className="flex flex-wrap gap-2">
+                    {formData.primary_goals.map(goal => (
+                      <span key={goal} className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm">
+                        {goal}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
-            {Object.keys(validationErrors).length > 0 && (
-              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                <h4 className="font-semibold text-red-900 mb-2 flex items-center">
-                  <AlertTriangle size={16} className="mr-2" />
-                  Validation Errors
-                </h4>
-                <ul className="text-sm text-red-800 space-y-1">
-                  {Object.entries(validationErrors).map(([field, error]) => (
-                    <li key={field}>• {error}</li>
+            {/* Validation errors and warnings */}
+            {Object.keys(stepErrors).length > 0 && (
+              <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+                <h4 className="font-medium text-red-900 mb-2">Please fix the following issues:</h4>
+                <ul className="list-disc list-inside space-y-1">
+                  {Object.values(stepErrors).map((error, index) => (
+                    <li key={index} className="text-sm text-red-700">{error}</li>
                   ))}
                 </ul>
               </div>
             )}
 
-            {Object.keys(validationWarnings).length > 0 && (
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                <h4 className="font-semibold text-yellow-900 mb-2 flex items-center">
-                  <AlertTriangle size={16} className="mr-2" />
-                  Warnings
-                </h4>
-                <ul className="text-sm text-yellow-800 space-y-1">
-                  {Object.entries(validationWarnings).map(([field, warning]) => (
-                    <li key={field}>• {warning}</li>
+            {Object.keys(stepWarnings).length > 0 && (
+              <div className="p-4 bg-orange-50 border border-orange-200 rounded-lg">
+                <h4 className="font-medium text-orange-900 mb-2">Please review:</h4>
+                <ul className="list-disc list-inside space-y-1">
+                  {Object.values(stepWarnings).map((warning, index) => (
+                    <li key={index} className="text-sm text-orange-700">{warning}</li>
                   ))}
                 </ul>
               </div>
             )}
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="bg-white border border-gray-200 rounded-lg p-4">
-                <h4 className="font-semibold text-gray-900 mb-3">Basic Information</h4>
-                <div className="space-y-2 text-sm">
-                  <div><strong>Name:</strong> {formData.name}</div>
-                  <div><strong>Country:</strong> {formData.country}</div>
-                  <div><strong>Region:</strong> {formData.region || 'Not specified'}</div>
-                  <div><strong>Type:</strong> {formData.structure_type}</div>
-                </div>
-              </div>
-
-              <div className="bg-white border border-gray-200 rounded-lg p-4">
-                <h4 className="font-semibold text-gray-900 mb-3">Location</h4>
-                <div className="space-y-2 text-sm">
-                  <div><strong>Coordinates:</strong> {formData.lat}°, {formData.lon}°</div>
-                  <div><strong>Water Depth:</strong> {formData.water_depth || 'Not specified'}m</div>
-                  <div><strong>Wave Exposure:</strong> {formData.wave_exposure || 'Not specified'}</div>
-                  <div><strong>Seabed:</strong> {formData.seabed_type || 'Not specified'}</div>
-                </div>
-              </div>
-
-              <div className="bg-white border border-gray-200 rounded-lg p-4">
-                <h4 className="font-semibold text-gray-900 mb-3">Technical Specs</h4>
-                <div className="space-y-2 text-sm">
-                  <div><strong>Dimensions:</strong> {formData.length || 0} × {formData.width || 0} × {formData.height || 0}m</div>
-                  <div><strong>Design Life:</strong> {formData.design_life} years</div>
-                  <div><strong>Function:</strong> {formData.primary_function || 'Not specified'}</div>
-                </div>
-              </div>
-
-              <div className="bg-white border border-gray-200 rounded-lg p-4">
-                <h4 className="font-semibold text-gray-900 mb-3">Project Goals</h4>
-                <div className="space-y-2 text-sm">
-                  <div><strong>Primary Goals:</strong> {formData.primary_goals.length > 0 ? formData.primary_goals.join(', ') : 'None specified'}</div>
-                  <div><strong>Target Species:</strong> {formData.target_species.length > 0 ? formData.target_species.join(', ') : 'None specified'}</div>
-                  <div><strong>Carbon Target:</strong> {formData.carbon_targets || 'Not specified'} tonnes/year</div>
-                </div>
-              </div>
-            </div>
           </div>
         );
 
       default:
         return <div>Unknown step</div>;
     }
-  }, [currentStep, formData, validationErrors, validationWarnings, updateFormData, handleMultiSelectChange]);
-
-  const currentStepData = STEPS[currentStep];
-  const isLastStep = currentStep === STEPS.length - 1;
-  const isFirstStep = currentStep === 0;
+  };
 
   return (
-    <div className="max-w-4xl mx-auto">
-      {/* Header */}
+    <div className="max-w-4xl mx-auto p-6">
+      {/* Progress indicator */}
       <div className="mb-8">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-2xl font-bold text-gray-900">Create New Project</h2>
-          {isModal && onClose && (
-            <button
-              onClick={onClose}
-              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-            >
-              <X size={20} className="text-gray-500" />
-            </button>
-          )}
-        </div>
-        
-        {/* Progress Steps */}
         <div className="flex items-center justify-between">
-          {STEPS.map((step, index) => {
-            const Icon = step.icon;
-            const isActive = index === currentStep;
-            const isCompleted = index < currentStep;
-            const canAccess = canProceedToStep(index);
-            
-            return (
-              <div key={step.id} className="flex items-center">
-                <button
-                  onClick={() => handleStepClick(index)}
-                  disabled={!canAccess}
-                  className={`flex items-center justify-center w-10 h-10 rounded-full border-2 transition-colors ${
-                    isActive 
-                      ? 'border-blue-600 bg-blue-600 text-white' 
-                      : isCompleted
-                        ? 'border-green-600 bg-green-600 text-white'
-                        : canAccess
-                          ? 'border-gray-300 bg-white text-gray-500 hover:border-blue-300'
-                          : 'border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed'
-                  }`}
-                >
-                  {isCompleted ? (
-                    <CheckCircle size={16} />
-                  ) : (
-                    <Icon size={16} />
-                  )}
-                </button>
-                
-                <div className="ml-3 mr-8">
-                  <div className={`text-sm font-medium ${
-                    isActive ? 'text-blue-600' : isCompleted ? 'text-green-600' : 'text-gray-500'
-                  }`}>
-                    {step.title}
-                  </div>
-                </div>
+          {STEPS.map((step, index) => (
+            <div key={step.id} className="flex items-center">
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                index < currentStep 
+                  ? 'bg-green-500 text-white' 
+                  : index === currentStep 
+                    ? 'bg-blue-500 text-white' 
+                    : 'bg-gray-200 text-gray-600'
+              }`}>
+                {index < currentStep ? (
+                  <CheckCircle size={20} />
+                ) : (
+                  <step.icon size={20} />
+                )}
               </div>
-            );
-          })}
+              {index < STEPS.length - 1 && (
+                <div className={`w-12 h-1 mx-2 ${
+                  index < currentStep ? 'bg-green-500' : 'bg-gray-200'
+                }`} />
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="mt-4">
+          <h2 className="text-xl font-semibold text-gray-900">
+            Step {currentStep + 1}: {STEPS[currentStep].title}
+          </h2>
         </div>
       </div>
 
-      {/* Error Display */}
-      <ErrorAlert
-        error={submitError}
-        onDismiss={() => setSubmitError(null)}
-        contextName="Project Creation"
-      />
+      {/* Submit error */}
+      {submitError && (
+        <ErrorAlert 
+          error={submitError} 
+          onDismiss={() => setSubmitError(null)}
+          contextName="Project Creation"
+        />
+      )}
 
-      {/* Step Content */}
-      <div className="bg-white rounded-lg shadow-sm border p-8 mb-8">
-        <div className="mb-6">
-          <h3 className="text-xl font-semibold text-gray-900 flex items-center">
-            <currentStepData.icon size={24} className="mr-3 text-blue-600" />
-            {currentStepData.title}
-          </h3>
-        </div>
-
-        {stepContent}
+      {/* Step content */}
+      <div className="mb-8">
+        {renderStepContent()}
       </div>
 
       {/* Navigation */}
       <div className="flex items-center justify-between">
         <button
-          onClick={handlePrevious}
-          disabled={isFirstStep}
-          className="flex items-center space-x-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          onClick={handlePrevStep}
+          disabled={currentStep === 0}
+          className="flex items-center space-x-2 px-4 py-2 text-gray-600 hover:text-gray-900 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <ArrowLeft size={16} />
           <span>Previous</span>
         </button>
 
-        <div className="text-sm text-gray-500">
-          Step {currentStep + 1} of {STEPS.length}
-        </div>
+        <div className="flex items-center space-x-4">
+          {isModal && (
+            <button
+              onClick={onClose}
+              className="flex items-center space-x-2 px-4 py-2 text-gray-600 hover:text-gray-900"
+            >
+              <X size={16} />
+              <span>Cancel</span>
+            </button>
+          )}
 
-        {isLastStep ? (
-          <button
-            onClick={handleSubmit}
-            disabled={isSubmitting || Object.keys(validationErrors).length > 0}
-            className="flex items-center space-x-2 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {isSubmitting ? (
-              <div className="w-4 h-4 border border-white border-t-transparent rounded-full animate-spin" />
-            ) : (
-              <Save size={16} />
-            )}
-            <span>{isSubmitting ? 'Creating...' : 'Create Project'}</span>
-          </button>
-        ) : (
-          <button
-            onClick={handleNext}
-            disabled={Object.keys(validationErrors).length > 0}
-            className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            <span>Next</span>
-            <ArrowRight size={16} />
-          </button>
-        )}
+          {currentStep < STEPS.length - 1 ? (
+            <button
+              onClick={handleNextStep}
+              disabled={!canProceedToNextStep}
+              className="flex items-center space-x-2 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              <span>Next</span>
+              <ArrowRight size={16} />
+            </button>
+          ) : (
+            <button
+              onClick={handleSubmit}
+              disabled={!canSubmit || isSubmitting}
+              className="flex items-center space-x-2 px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {isSubmitting ? (
+                <>
+                  <div className="w-4 h-4 border border-white border-t-transparent rounded-full animate-spin" />
+                  <span>Creating...</span>
+                </>
+              ) : (
+                <>
+                  <Save size={16} />
+                  <span>Create Project</span>
+                </>
+              )}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
