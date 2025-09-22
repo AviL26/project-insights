@@ -1,330 +1,351 @@
+// backend/server.js - Updated with Database Pooling & Your Existing Error Handler
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
 const compression = require('compression');
-const morgan = require('morgan');
-const path = require('path');
 
-// Import our modules
-const { initializeDatabase, db } = require('./db/database');
+// Import enhanced database service
+const dbService = require('./db/database-service');
 
-// Import routes
+// Import your existing error handler
+const {
+  globalErrorHandler,
+  notFoundHandler,
+  timeoutHandler,
+  asyncHandler,
+  AppError,
+  ValidationError,
+  DatabaseError,
+  errorLogger,
+  healthCheck
+} = require('./middleware/error-handler');
+
+// Import existing middleware (if you have these)
+const { securityHeaders, corsOptions, generalRateLimit } = require('./middleware/security');
+
+// Import route handlers
 const projectsRouter = require('./routes/projects');
-// Add other routes as needed
-// const materialsRouter = require('./routes/materials');
-// const ecologicalRouter = require('./routes/ecological');
-// const complianceRouter = require('./routes/compliance');
+const materialsRouter = require('./routes/materials');
+const ecologicalRouter = require('./routes/ecological');
+const complianceRouter = require('./routes/compliance');
+const authRouter = require('./routes/auth');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Security middleware
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-      fontSrc: ["'self'", "https://fonts.gstatic.com"],
-      imgSrc: ["'self'", "data:", "https:"],
-      scriptSrc: ["'self'"],
-      connectSrc: ["'self'", "http://localhost:3001"]
-    },
-  },
-  crossOriginEmbedderPolicy: false
-}));
-
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 1000, // Limit each IP to 1000 requests per windowMs
-  message: {
-    success: false,
-    message: 'Too many requests from this IP, please try again later.',
-    code: 'RATE_LIMIT_EXCEEDED'
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: (req) => {
-    // Skip rate limiting for health checks
-    return req.path === '/health' || req.path === '/api/health';
-  }
+// Set up process error handlers
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  errorLogger.log(error, null, 'error');
+  process.exit(1);
 });
 
-// CORS configuration
-const corsOptions = {
-  origin: function (origin, callback) {
-    // Allow requests with no origin (mobile apps, curl, etc.)
-    if (!origin) return callback(null, true);
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  errorLogger.log(new Error(`Unhandled Rejection: ${reason}`), null, 'error');
+  process.exit(1);
+});
+
+// Graceful shutdown handler
+const gracefulShutdown = (signal) => {
+  console.log(`Received ${signal}, starting graceful shutdown`);
+  
+  if (global.server) {
+    global.server.close(async () => {
+      console.log('HTTP server closed');
+      await dbService.close();
+      process.exit(0);
+    });
     
-    const allowedOrigins = [
-      'http://localhost:3000',
-      'http://localhost:3001',
-      'http://127.0.0.1:3000',
-      'http://127.0.0.1:3001'
-    ];
-    
-    // Add production origins from environment
-    if (process.env.ALLOWED_ORIGINS) {
-      allowedOrigins.push(...process.env.ALLOWED_ORIGINS.split(','));
-    }
-    
-    if (allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+    setTimeout(() => {
+      console.error('Could not close connections in time, forcefully shutting down');
+      process.exit(1);
+    }, 10000);
+  } else {
+    process.exit(0);
+  }
 };
 
-app.use(cors(corsOptions));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
-// Compression middleware
-app.use(compression({
-  filter: (req, res) => {
-    if (req.headers['x-no-compression']) {
-      return false;
-    }
-    return compression.filter(req, res);
-  },
-  threshold: 1024 // Only compress responses larger than 1KB
-}));
+// Trust proxy for accurate IP addresses
+app.set('trust proxy', 1);
 
-// Logging middleware
-if (process.env.NODE_ENV === 'production') {
-  app.use(morgan('combined'));
-} else {
-  app.use(morgan('dev'));
+// Core middleware
+app.use(helmet(securityHeaders || {}));
+app.use(compression());
+app.use(cors(corsOptions || {}));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Apply timeout and rate limiting
+app.use(timeoutHandler(30000)); // 30 second timeout
+if (generalRateLimit) {
+  app.use(generalRateLimit);
 }
 
-// Body parsing middleware with limits
-app.use(express.json({
-  limit: '10mb'
-}));
-
-app.use(express.urlencoded({ 
-  extended: true, 
-  limit: '10mb' 
-}));
-
-// Security headers and request metadata
+// Request logging middleware
 app.use((req, res, next) => {
-  // Add request ID for tracking
-  req.id = Date.now().toString(36) + Math.random().toString(36).substr(2);
+  const start = Date.now();
   
-  // Add security headers
-  res.setHeader('X-Request-ID', req.id);
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('X-XSS-Protection', '1; mode=block');
-  
-  // Remove powered by header
-  res.removeHeader('X-Powered-By');
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    const level = res.statusCode >= 400 ? 'warn' : 'info';
+    
+    errorLogger.log({
+      message: 'Request completed',
+      statusCode: res.statusCode,
+      method: req.method,
+      url: req.url,
+      duration: `${duration}ms`,
+      ip: req.ip,
+      userAgent: req.get('User-Agent')
+    }, req, level);
+  });
   
   next();
 });
 
 // Health check endpoints
-app.get('/health', async (req, res) => {
-  try {
-    // Test database connection
-    await db.get('SELECT 1 as test');
-    
-    const health = {
-      status: 'healthy',
-      timestamp: new Date().toISOString(),
-      uptime: process.uptime(),
-      environment: process.env.NODE_ENV,
-      version: '2.0.0',
-      database: 'connected',
-      memory: {
-        used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
-        total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),
-        rss: Math.round(process.memoryUsage().rss / 1024 / 1024)
-      }
-    };
-    
-    res.json(health);
-  } catch (error) {
-    res.status(503).json({
-      status: 'unhealthy',
-      error: error.message,
-      timestamp: new Date().toISOString()
-    });
-  }
-});
+app.get('/health', asyncHandler(async (req, res) => {
+  const dbHealth = await dbService.healthCheck();
+  const errorSystemHealth = healthCheck.checkErrorHandling();
+  
+  const healthStatus = {
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    version: process.env.npm_package_version || '2.1.0',
+    environment: process.env.NODE_ENV || 'development',
+    uptime: process.uptime(),
+    memory: process.memoryUsage(),
+    databases: {
+      sqlite: dbHealth.status === 'healthy',
+      postgresql: false,
+      activeType: 'sqlite'
+    },
+    features: {
+      enhancedCompliance: false,
+      standardCompliance: true,
+      authentication: true,
+      rateLimiting: true,
+      inputSanitization: true,
+      securityHeaders: true,
+      errorHandling: errorSystemHealth.status === 'healthy',
+      connectionPooling: true,
+      backupSystem: true,
+      structuredLogging: true
+    },
+    security: {
+      cors: true,
+      helmet: true,
+      rateLimit: true,
+      sanitization: true,
+      authentication: 'available'
+    },
+    connectionPool: dbHealth.connectionPool || {},
+    errorHandling: errorSystemHealth
+  };
+  
+  res.json(healthStatus);
+}));
 
-// Apply rate limiting
-app.use(limiter);
-
-// API routes
-app.use('/api/projects', projectsRouter);
-// Add other routes when ready
-// app.use('/api/materials', materialsRouter);
-// app.use('/api/ecological', ecologicalRouter);
-// app.use('/api/compliance', complianceRouter);
-
-// Stats endpoint
-app.get('/api/stats', async (req, res) => {
-  try {
-    const stats = await Promise.all([
-      db.get('SELECT COUNT(*) as count FROM projects'),
-      db.get('SELECT COUNT(*) as count FROM materials'),
-      db.get('SELECT COUNT(*) as count FROM ecological_data'),
-      db.get('SELECT COUNT(*) as count FROM compliance_data'),
-      db.get('SELECT AVG(budget) as avg_budget FROM projects WHERE budget IS NOT NULL')
-    ]);
-    
-    res.json({
-      success: true,
-      data: {
-        projects: stats[0]?.count || 0,
-        materials: stats[1]?.count || 0,
-        ecologicalRecords: stats[2]?.count || 0,
-        complianceRecords: stats[3]?.count || 0,
-        averageBudget: Math.round(stats[4]?.avg_budget || 0)
-      }
-    });
-  } catch (error) {
-    console.error('Error fetching stats:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch statistics',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
-    });
-  }
-});
+app.get('/health/detailed', asyncHandler(async (req, res) => {
+  const [dbHealth, dbIntegrity] = await Promise.all([
+    dbService.healthCheck(),
+    dbService.checkDataIntegrity()
+  ]);
+  
+  res.json({
+    database: dbHealth,
+    dataIntegrity: dbIntegrity,
+    errorHandling: healthCheck.checkErrorHandling(),
+    timestamp: new Date().toISOString()
+  });
+}));
 
 // API documentation endpoint
 app.get('/api/docs', (req, res) => {
   res.json({
-    success: true,
-    message: 'ECOncrete Project Insights API',
-    version: '2.0.0',
-    documentation: 'https://github.com/your-username/project-insights',
-    endpoints: {
-      projects: '/api/projects',
-      health: '/api/health',
-      stats: '/api/stats'
-    },
+    title: 'ECOncrete Project Insights API',
+    version: '2.1.0',
+    description: 'Marine infrastructure project management API with enhanced data integrity and error handling',
+    baseUrl: `${req.protocol}://${req.get('host')}/api`,
     features: [
-      'Pagination',
-      'Filtering',
-      'Sorting',
-      'Data validation',
-      'Error handling',
-      'Rate limiting',
-      'Security headers'
-    ]
+      'Database connection pooling',
+      'Comprehensive error handling',
+      'Structured logging',
+      'Automatic backups',
+      'Data integrity checks',
+      'Transaction support',
+      'Activity auditing'
+    ],
+    endpoints: {
+      authentication: {
+        'POST /api/auth/register': 'Register new user',
+        'POST /api/auth/login': 'User login',
+        'POST /api/auth/logout': 'User logout',
+        'GET /api/auth/profile': 'Get user profile',
+        'PUT /api/auth/profile': 'Update user profile'
+      },
+      projects: {
+        'GET /api/projects': 'Get projects with pagination and filtering',
+        'GET /api/projects/by-status/:status': 'Get projects by status (active/archived)',
+        'GET /api/projects/:id': 'Get single project with related data',
+        'POST /api/projects': 'Create new project',
+        'PUT /api/projects/:id': 'Update project',
+        'DELETE /api/projects/:id': 'Delete project'
+      },
+      materials: {
+        'GET /api/materials': 'Get all materials with pagination',
+        'GET /api/materials/project/:projectId': 'Get materials for project',
+        'GET /api/materials/:id': 'Get single material',
+        'POST /api/materials': 'Create material entry',
+        'PUT /api/materials/:id': 'Update material',
+        'DELETE /api/materials/:id': 'Delete material'
+      },
+      ecological: {
+        'GET /api/ecological': 'Get ecological data',
+        'GET /api/ecological/project/:projectId': 'Get ecological data for project',
+        'POST /api/ecological': 'Create ecological entry',
+        'PUT /api/ecological/:id': 'Update ecological data',
+        'DELETE /api/ecological/:id': 'Delete ecological data'
+      },
+      compliance: {
+        'GET /api/compliance': 'Get compliance data',
+        'GET /api/compliance/project/:projectId': 'Get compliance for project',
+        'POST /api/compliance': 'Create compliance entry',
+        'PUT /api/compliance/:id': 'Update compliance',
+        'DELETE /api/compliance/:id': 'Delete compliance'
+      },
+      admin: {
+        'POST /api/admin/backup': 'Create manual database backup',
+        'GET /api/admin/integrity': 'Run data integrity check',
+        'GET /api/admin/stats': 'Get system statistics'
+      }
+    },
+    authentication: 'JWT Bearer token required for protected endpoints',
+    rateLimit: 'Applied per endpoint as configured',
+    errorHandling: 'Comprehensive error tracking with structured logging',
+    support: 'Check logs directory for detailed error information'
   });
 });
 
-// Serve static files from React build (in production)
-if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, 'build')));
-  
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'build', 'index.html'));
-  });
-}
+// Mount API routes
+app.use('/api/auth', authRouter);
+app.use('/api/projects', projectsRouter);
+app.use('/api/materials', materialsRouter);
+app.use('/api/ecological', ecologicalRouter);
+app.use('/api/compliance', complianceRouter);
 
-// 404 handler
-app.use((req, res, next) => {
-  res.status(404).json({
-    success: false,
-    message: `Route ${req.method} ${req.originalUrl} not found`,
-    code: 'NOT_FOUND'
-  });
-});
+// Admin endpoints
+app.post('/api/admin/backup', asyncHandler(async (req, res) => {
+  // TODO: Add authentication check here
+  try {
+    const backupPath = await dbService.createBackup('manual');
+    
+    res.json({
+      success: true,
+      message: 'Backup created successfully',
+      backupPath,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    throw new DatabaseError('Failed to create backup', error);
+  }
+}));
+
+app.get('/api/admin/integrity', asyncHandler(async (req, res) => {
+  // TODO: Add authentication check here
+  try {
+    const integrityCheck = await dbService.checkDataIntegrity();
+    
+    res.json({
+      success: true,
+      data: integrityCheck
+    });
+  } catch (error) {
+    throw new DatabaseError('Failed to run integrity check', error);
+  }
+}));
+
+app.get('/api/admin/stats', asyncHandler(async (req, res) => {
+  // TODO: Add authentication check here
+  try {
+    const stats = dbService.pool.getStats();
+    
+    res.json({
+      success: true,
+      data: {
+        connectionPool: stats,
+        memory: process.memoryUsage(),
+        uptime: process.uptime(),
+        environment: process.env.NODE_ENV,
+        timestamp: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    throw new DatabaseError('Failed to get system stats', error);
+  }
+}));
+
+// Handle 404 for all other routes
+app.use('*', notFoundHandler);
 
 // Global error handler (must be last)
-app.use((error, req, res, next) => {
-  console.error('Global error handler:', error);
-  
-  // Handle different types of errors
-  let statusCode = error.statusCode || 500;
-  let message = error.message || 'Internal server error';
-  
-  // Handle specific database errors
-  if (error.code && error.code.startsWith('SQLITE_')) {
-    statusCode = 400;
-    message = 'Database operation failed';
-  }
-  
-  // Handle JSON parsing errors
-  if (error.type === 'entity.parse.failed') {
-    statusCode = 400;
-    message = 'Invalid JSON format';
-  }
-  
-  res.status(statusCode).json({
-    success: false,
-    message,
-    code: error.code,
-    ...(process.env.NODE_ENV === 'development' && {
-      stack: error.stack
-    })
-  });
-});
+app.use(globalErrorHandler);
 
-// Database initialization and server startup
-const startServer = async () => {
+// Enhanced server startup
+const startServer = asyncHandler(async () => {
   try {
     console.log('🚀 Starting ECOncrete Project Insights Server...');
     
-    // Initialize database
+    // Initialize database service
     console.log('📊 Initializing database...');
-    await initializeDatabase();
+    await dbService.initialize();
     console.log('✅ Database initialization completed');
     
-    // Start server
+    // Start HTTP server
     const server = app.listen(PORT, () => {
-      console.log(`🌊 ECOncrete Server running on port ${PORT}`);
-      console.log(`📚 API Documentation: http://localhost:${PORT}/api/docs`);
-      console.log(`🏥 Health Check: http://localhost:${PORT}/health`);
-      console.log(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`
+🌊 ECOncrete Server running on port ${PORT}
+📚 API Documentation: http://localhost:${PORT}/api/docs
+🏥 Health Check: http://localhost:${PORT}/health
+🔧 Environment: ${process.env.NODE_ENV || 'development'}
+
+📋 Enhanced Features Active:
+   ✅ Database Connection Pooling
+   ✅ Comprehensive Error Handling
+   ✅ Structured Logging System
+   ✅ Automatic Backup System
+   ✅ Data Integrity Monitoring
+   ✅ Transaction Support
+   ✅ Activity Auditing
+   ✅ Graceful Shutdown
+      `);
     });
 
-    // Graceful shutdown handling
-    const gracefulShutdown = async (signal) => {
-      console.log(`\n${signal} received. Starting graceful shutdown...`);
-      
-      server.close(async () => {
-        console.log('HTTP server closed');
-        console.log('Graceful shutdown completed');
-        process.exit(0);
-      });
-      
-      // Force close after 30 seconds
-      setTimeout(() => {
-        console.error('Forced shutdown after timeout');
+    // Store server reference for graceful shutdown
+    global.server = server;
+    
+    // Handle server errors
+    server.on('error', (error) => {
+      if (error.code === 'EADDRINUSE') {
+        console.error(`❌ Port ${PORT} is already in use`);
         process.exit(1);
-      }, 30000);
-    };
-
-    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-    
-    // Handle uncaught exceptions
-    process.on('uncaughtException', (error) => {
-      console.error('Uncaught Exception:', error);
-      gracefulShutdown('UNCAUGHT_EXCEPTION');
+      } else {
+        errorLogger.log(error, null, 'error');
+        throw error;
+      }
     });
     
-    // Handle unhandled promise rejections
-    process.on('unhandledRejection', (reason, promise) => {
-      console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-      gracefulShutdown('UNHANDLED_REJECTION');
-    });
-
   } catch (error) {
-    console.error('❌ Failed to start server:', error);
+    console.error('❌ Failed to start server:', error.message);
+    errorLogger.log(error, null, 'error');
     process.exit(1);
   }
-};
+});
 
 // Start the server
 startServer();

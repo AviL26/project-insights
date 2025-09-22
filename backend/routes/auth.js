@@ -1,4 +1,4 @@
-// routes/auth.js - Complete Authentication Routes with Enhanced Database
+// routes/auth.js - Enhanced Authentication Routes with Phase 3 Performance Monitoring
 const express = require('express');
 const router = express.Router();
 const { 
@@ -16,8 +16,69 @@ const {
 // Use enhanced database manager
 const { dbManager } = require('../db/enhanced-connection');
 
+// Import Phase 3 utilities
+const { CacheService, PerformanceMonitor } = require('../utils/pagination');
+
+// Initialize Phase 3 services
+const cacheService = new CacheService();
+const performanceMonitor = new PerformanceMonitor();
+
+// Performance monitoring middleware
+router.use((req, res, next) => {
+  const start = Date.now();
+  
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    performanceMonitor.trackEndpoint(req.route?.path || req.path, duration, res.statusCode);
+  });
+  
+  next();
+});
+
+// Selective cache middleware for read-only operations
+const authCacheMiddleware = (ttl = 300000) => {
+  return (req, res, next) => {
+    // Only cache GET requests for user lists (admin operations)
+    if (req.method !== 'GET' || !req.originalUrl.includes('/users')) {
+      return next();
+    }
+
+    const cacheKey = cacheService.generateKey('auth_users', {
+      url: req.originalUrl,
+      query: req.query,
+      userId: req.user?.userId // Include user context for security
+    });
+
+    const cached = cacheService.get(cacheKey);
+    if (cached) {
+      console.log(`Auth cache hit for: ${req.originalUrl}`);
+      return res.json(cached);
+    }
+
+    // Override res.json to cache successful responses
+    const originalJson = res.json;
+    res.json = (data) => {
+      if (res.statusCode === 200) {
+        cacheService.set(cacheKey, data, ttl);
+        console.log(`Cached auth response for: ${req.originalUrl}`);
+      }
+      return originalJson.call(res, data);
+    };
+
+    next();
+  };
+};
+
+// Cache invalidation helper for user data changes
+const invalidateUserCache = () => {
+  cacheService.invalidate('auth_users');
+  console.log('User cache invalidated');
+};
+
 // Initialize users table using enhanced database
 const initializeUsersTable = async () => {
+  const startTime = Date.now();
+  
   try {
     await dbManager.query(`
       CREATE TABLE IF NOT EXISTS users (
@@ -39,9 +100,15 @@ const initializeUsersTable = async () => {
     await dbManager.query('CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)');
     await dbManager.query('CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)');
     await dbManager.query('CREATE INDEX IF NOT EXISTS idx_users_active ON users(is_active)');
+    await dbManager.query('CREATE INDEX IF NOT EXISTS idx_users_last_login ON users(last_login_at)');
     
-    console.log('✅ Users table initialized with enhanced database');
+    const duration = Date.now() - startTime;
+    performanceMonitor.trackQuery('CREATE users table', duration, true);
+    
+    console.log(`✅ Users table initialized with enhanced database in ${duration}ms`);
   } catch (error) {
+    const duration = Date.now() - startTime;
+    performanceMonitor.trackQuery('CREATE users table', duration, false);
     console.error('❌ Failed to initialize users table:', error);
   }
 };
@@ -51,6 +118,8 @@ initializeUsersTable();
 
 // User registration
 router.post('/register', validateUser, handleValidationErrors, async (req, res) => {
+  const startTime = Date.now();
+  
   try {
     const { email, password, name, role = 'user' } = req.body;
     
@@ -61,6 +130,9 @@ router.post('/register', validateUser, handleValidationErrors, async (req, res) 
     );
     
     if (existingUsers.length > 0) {
+      const duration = Date.now() - startTime;
+      performanceMonitor.trackQuery('SELECT user exists check', duration, true);
+      
       return res.status(409).json({
         success: false,
         message: 'User with this email already exists',
@@ -78,6 +150,15 @@ router.post('/register', validateUser, handleValidationErrors, async (req, res) 
     // Generate token
     const token = generateToken(result.lastInsertRowid, email, role);
     
+    // Track performance
+    const duration = Date.now() - startTime;
+    performanceMonitor.trackQuery('INSERT user registration', duration, true);
+    
+    // Invalidate user cache since new user added
+    invalidateUserCache();
+    
+    console.log(`User registered in ${duration}ms - ID: ${result.lastInsertRowid}`);
+    
     res.status(201).json({
       success: true,
       message: 'User created successfully',
@@ -89,10 +170,16 @@ router.post('/register', validateUser, handleValidationErrors, async (req, res) 
           role 
         },
         token
+      },
+      performance: {
+        queryTime: duration
       }
     });
     
   } catch (error) {
+    const duration = Date.now() - startTime;
+    performanceMonitor.trackQuery('INSERT user registration', duration, false);
+    
     console.error('Registration error:', error);
     
     // Handle specific database errors
@@ -114,6 +201,8 @@ router.post('/register', validateUser, handleValidationErrors, async (req, res) 
 
 // User login
 router.post('/login', validateLogin, handleValidationErrors, async (req, res) => {
+  const startTime = Date.now();
+  
   try {
     const { email, password } = req.body;
     
@@ -125,6 +214,9 @@ router.post('/login', validateLogin, handleValidationErrors, async (req, res) =>
     
     const user = users[0];
     if (!user) {
+      const duration = Date.now() - startTime;
+      performanceMonitor.trackQuery('SELECT user login', duration, true);
+      
       return res.status(401).json({
         success: false,
         message: 'Invalid email or password',
@@ -135,6 +227,9 @@ router.post('/login', validateLogin, handleValidationErrors, async (req, res) =>
     // Verify password
     const isValidPassword = await comparePassword(password, user.password_hash);
     if (!isValidPassword) {
+      const duration = Date.now() - startTime;
+      performanceMonitor.trackQuery('SELECT user login', duration, true);
+      
       return res.status(401).json({
         success: false,
         message: 'Invalid email or password',
@@ -151,6 +246,12 @@ router.post('/login', validateLogin, handleValidationErrors, async (req, res) =>
     // Generate token
     const token = generateToken(user.id, user.email, user.role);
     
+    // Track performance
+    const duration = Date.now() - startTime;
+    performanceMonitor.trackQuery('SELECT user login', duration, true);
+    
+    console.log(`User login successful in ${duration}ms - ID: ${user.id}`);
+    
     res.json({
       success: true,
       message: 'Login successful',
@@ -163,10 +264,16 @@ router.post('/login', validateLogin, handleValidationErrors, async (req, res) =>
           lastLoginAt: user.last_login_at
         },
         token
+      },
+      performance: {
+        queryTime: duration
       }
     });
     
   } catch (error) {
+    const duration = Date.now() - startTime;
+    performanceMonitor.trackQuery('SELECT user login', duration, false);
+    
     console.error('Login error:', error);
     res.status(500).json({
       success: false,
@@ -178,6 +285,8 @@ router.post('/login', validateLogin, handleValidationErrors, async (req, res) =>
 
 // Get current user profile
 router.get('/profile', authenticateToken, async (req, res) => {
+  const startTime = Date.now();
+  
   try {
     const users = await dbManager.query(`
       SELECT id, email, name, role, created_at, last_login_at, is_active
@@ -186,6 +295,9 @@ router.get('/profile', authenticateToken, async (req, res) => {
     
     const user = users[0];
     if (!user) {
+      const duration = Date.now() - startTime;
+      performanceMonitor.trackQuery('SELECT user profile', duration, true);
+      
       return res.status(404).json({
         success: false,
         message: 'User not found',
@@ -193,12 +305,21 @@ router.get('/profile', authenticateToken, async (req, res) => {
       });
     }
     
+    const duration = Date.now() - startTime;
+    performanceMonitor.trackQuery('SELECT user profile', duration, true);
+    
     res.json({ 
       success: true, 
-      data: { user } 
+      data: { user },
+      performance: {
+        queryTime: duration
+      }
     });
     
   } catch (error) {
+    const duration = Date.now() - startTime;
+    performanceMonitor.trackQuery('SELECT user profile', duration, false);
+    
     console.error('Profile fetch error:', error);
     res.status(500).json({
       success: false,
@@ -210,6 +331,8 @@ router.get('/profile', authenticateToken, async (req, res) => {
 
 // Update user profile
 router.put('/profile', authenticateToken, async (req, res) => {
+  const startTime = Date.now();
+  
   try {
     const { name, email } = req.body;
     const userId = req.user.userId;
@@ -239,6 +362,9 @@ router.put('/profile', authenticateToken, async (req, res) => {
       );
       
       if (existingUsers.length > 0) {
+        const duration = Date.now() - startTime;
+        performanceMonitor.trackQuery('UPDATE user profile', duration, true);
+        
         return res.status(409).json({
           success: false,
           message: 'Email is already taken',
@@ -257,6 +383,9 @@ router.put('/profile', authenticateToken, async (req, res) => {
     `, [name, email, userId]);
     
     if (result.changes === 0) {
+      const duration = Date.now() - startTime;
+      performanceMonitor.trackQuery('UPDATE user profile', duration, true);
+      
       return res.status(404).json({
         success: false,
         message: 'User not found',
@@ -270,13 +399,28 @@ router.put('/profile', authenticateToken, async (req, res) => {
       FROM users WHERE id = ?
     `, [userId]);
     
+    // Track performance
+    const duration = Date.now() - startTime;
+    performanceMonitor.trackQuery('UPDATE user profile', duration, true);
+    
+    // Invalidate user cache since profile updated
+    invalidateUserCache();
+    
+    console.log(`User profile updated in ${duration}ms - ID: ${userId}`);
+    
     res.json({
       success: true,
       message: 'Profile updated successfully',
-      data: { user: updatedUsers[0] }
+      data: { user: updatedUsers[0] },
+      performance: {
+        queryTime: duration
+      }
     });
     
   } catch (error) {
+    const duration = Date.now() - startTime;
+    performanceMonitor.trackQuery('UPDATE user profile', duration, false);
+    
     console.error('Profile update error:', error);
     res.status(500).json({
       success: false,
@@ -288,6 +432,8 @@ router.put('/profile', authenticateToken, async (req, res) => {
 
 // Change password
 router.put('/password', authenticateToken, async (req, res) => {
+  const startTime = Date.now();
+  
   try {
     const { currentPassword, newPassword } = req.body;
     
@@ -315,6 +461,9 @@ router.put('/password', authenticateToken, async (req, res) => {
     
     const user = users[0];
     if (!user) {
+      const duration = Date.now() - startTime;
+      performanceMonitor.trackQuery('UPDATE user password', duration, true);
+      
       return res.status(404).json({
         success: false,
         message: 'User not found',
@@ -325,6 +474,9 @@ router.put('/password', authenticateToken, async (req, res) => {
     // Verify current password
     const isValidPassword = await comparePassword(currentPassword, user.password_hash);
     if (!isValidPassword) {
+      const duration = Date.now() - startTime;
+      performanceMonitor.trackQuery('UPDATE user password', duration, true);
+      
       return res.status(401).json({
         success: false,
         message: 'Current password is incorrect',
@@ -342,12 +494,24 @@ router.put('/password', authenticateToken, async (req, res) => {
       WHERE id = ?
     `, [hashedNewPassword, req.user.userId]);
     
+    // Track performance
+    const duration = Date.now() - startTime;
+    performanceMonitor.trackQuery('UPDATE user password', duration, true);
+    
+    console.log(`Password changed in ${duration}ms - User ID: ${req.user.userId}`);
+    
     res.json({
       success: true,
-      message: 'Password updated successfully'
+      message: 'Password updated successfully',
+      performance: {
+        queryTime: duration
+      }
     });
     
   } catch (error) {
+    const duration = Date.now() - startTime;
+    performanceMonitor.trackQuery('UPDATE user password', duration, false);
+    
     console.error('Password change error:', error);
     res.status(500).json({
       success: false,
@@ -359,6 +523,8 @@ router.put('/password', authenticateToken, async (req, res) => {
 
 // Deactivate account (soft delete)
 router.delete('/account', authenticateToken, async (req, res) => {
+  const startTime = Date.now();
+  
   try {
     const { password } = req.body;
     
@@ -378,6 +544,9 @@ router.delete('/account', authenticateToken, async (req, res) => {
     
     const user = users[0];
     if (!user) {
+      const duration = Date.now() - startTime;
+      performanceMonitor.trackQuery('DELETE user account', duration, true);
+      
       return res.status(404).json({
         success: false,
         message: 'User not found',
@@ -388,6 +557,9 @@ router.delete('/account', authenticateToken, async (req, res) => {
     // Verify password
     const isValidPassword = await comparePassword(password, user.password_hash);
     if (!isValidPassword) {
+      const duration = Date.now() - startTime;
+      performanceMonitor.trackQuery('DELETE user account', duration, true);
+      
       return res.status(401).json({
         success: false,
         message: 'Password is incorrect',
@@ -402,12 +574,27 @@ router.delete('/account', authenticateToken, async (req, res) => {
       WHERE id = ?
     `, [req.user.userId]);
     
+    // Track performance
+    const duration = Date.now() - startTime;
+    performanceMonitor.trackQuery('DELETE user account', duration, true);
+    
+    // Invalidate user cache since user deactivated
+    invalidateUserCache();
+    
+    console.log(`Account deactivated in ${duration}ms - User ID: ${req.user.userId}`);
+    
     res.json({
       success: true,
-      message: 'Account deactivated successfully'
+      message: 'Account deactivated successfully',
+      performance: {
+        queryTime: duration
+      }
     });
     
   } catch (error) {
+    const duration = Date.now() - startTime;
+    performanceMonitor.trackQuery('DELETE user account', duration, false);
+    
     console.error('Account deactivation error:', error);
     res.status(500).json({
       success: false,
@@ -449,8 +636,10 @@ router.post('/refresh', authenticateToken, (req, res) => {
   }
 });
 
-// Admin endpoint: List all users (admin only)
-router.get('/users', authenticateToken, async (req, res) => {
+// Admin endpoint: List all users (admin only) - WITH CACHING
+router.get('/users', authenticateToken, authCacheMiddleware(180000), async (req, res) => {
+  const startTime = Date.now();
+  
   try {
     // Check if user is admin
     if (req.user.role !== 'admin') {
@@ -461,7 +650,7 @@ router.get('/users', authenticateToken, async (req, res) => {
       });
     }
     
-    const { page = 1, limit = 10, search = '' } = req.query;
+    const { page = 1, limit = 10, search = '', role = '' } = req.query;
     const offset = (page - 1) * limit;
     
     let whereClause = 'WHERE is_active = 1';
@@ -472,9 +661,17 @@ router.get('/users', authenticateToken, async (req, res) => {
       params.push(`%${search}%`, `%${search}%`);
     }
     
-    // Get users
+    if (role) {
+      whereClause += ' AND role = ?';
+      params.push(role);
+    }
+    
+    // Get users with enhanced data
     const users = await dbManager.query(`
-      SELECT id, email, name, role, created_at, last_login_at
+      SELECT 
+        id, email, name, role, created_at, last_login_at,
+        julianday('now') - julianday(last_login_at) as days_since_login,
+        julianday('now') - julianday(created_at) as days_since_registration
       FROM users ${whereClause}
       ORDER BY created_at DESC
       LIMIT ? OFFSET ?
@@ -485,27 +682,130 @@ router.get('/users', authenticateToken, async (req, res) => {
       SELECT COUNT(*) as total FROM users ${whereClause}
     `, params);
     
+    // Get user statistics
+    const statsResult = await dbManager.query(`
+      SELECT 
+        COUNT(*) as total_users,
+        SUM(CASE WHEN role = 'admin' THEN 1 ELSE 0 END) as admin_count,
+        SUM(CASE WHEN role = 'user' THEN 1 ELSE 0 END) as user_count,
+        SUM(CASE WHEN role = 'viewer' THEN 1 ELSE 0 END) as viewer_count,
+        SUM(CASE WHEN last_login_at >= date('now', '-30 days') THEN 1 ELSE 0 END) as active_last_30_days,
+        SUM(CASE WHEN created_at >= date('now', '-7 days') THEN 1 ELSE 0 END) as new_last_7_days
+      FROM users WHERE is_active = 1
+    `);
+    
     const total = countResult[0].total;
+    const stats = statsResult[0];
+    
+    // Track performance
+    const duration = Date.now() - startTime;
+    performanceMonitor.trackQuery('SELECT admin user list', duration, true);
+    
+    console.log(`Admin user list retrieved in ${duration}ms`);
     
     res.json({
       success: true,
       data: {
         users,
+        statistics: stats,
         pagination: {
           page: parseInt(page),
           limit: parseInt(limit),
           total,
           pages: Math.ceil(total / limit)
         }
+      },
+      performance: {
+        queryTime: duration,
+        cached: false
       }
     });
     
   } catch (error) {
+    const duration = Date.now() - startTime;
+    performanceMonitor.trackQuery('SELECT admin user list', duration, false);
+    
     console.error('List users error:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to list users',
       code: 'LIST_USERS_ERROR'
+    });
+  }
+});
+
+// Admin endpoint: Get authentication statistics
+router.get('/admin/stats', authenticateToken, authCacheMiddleware(300000), async (req, res) => {
+  const startTime = Date.now();
+  
+  try {
+    // Check if user is admin
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Admin access required',
+        code: 'INSUFFICIENT_PERMISSIONS'
+      });
+    }
+    
+    const [userStats, loginTrends] = await Promise.all([
+      // Overall user statistics
+      dbManager.query(`
+        SELECT 
+          COUNT(*) as total_users,
+          COUNT(CASE WHEN is_active = 1 THEN 1 END) as active_users,
+          COUNT(CASE WHEN is_active = 0 THEN 1 END) as inactive_users,
+          COUNT(CASE WHEN role = 'admin' THEN 1 END) as admin_users,
+          COUNT(CASE WHEN role = 'user' THEN 1 END) as regular_users,
+          COUNT(CASE WHEN role = 'viewer' THEN 1 END) as viewer_users,
+          COUNT(CASE WHEN last_login_at >= date('now', '-1 day') THEN 1 END) as logins_last_24h,
+          COUNT(CASE WHEN last_login_at >= date('now', '-7 days') THEN 1 END) as logins_last_7d,
+          COUNT(CASE WHEN last_login_at >= date('now', '-30 days') THEN 1 END) as logins_last_30d,
+          COUNT(CASE WHEN created_at >= date('now', '-7 days') THEN 1 END) as registrations_last_7d
+        FROM users
+      `),
+      
+      // Login trends (last 30 days)
+      dbManager.query(`
+        SELECT 
+          DATE(last_login_at) as login_date,
+          COUNT(*) as login_count
+        FROM users 
+        WHERE last_login_at >= date('now', '-30 days')
+          AND last_login_at IS NOT NULL
+        GROUP BY DATE(last_login_at)
+        ORDER BY login_date DESC
+        LIMIT 30
+      `)
+    ]);
+    
+    // Track performance
+    const duration = Date.now() - startTime;
+    performanceMonitor.trackQuery('SELECT auth statistics', duration, true);
+    
+    console.log(`Auth statistics retrieved in ${duration}ms`);
+    
+    res.json({
+      success: true,
+      data: {
+        userStatistics: userStats[0],
+        loginTrends: loginTrends
+      },
+      performance: {
+        queryTime: duration,
+        cached: false
+      }
+    });
+    
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    performanceMonitor.trackQuery('SELECT auth statistics', duration, false);
+    
+    console.error('Auth stats error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch authentication statistics',
+      code: 'AUTH_STATS_ERROR'
     });
   }
 });
