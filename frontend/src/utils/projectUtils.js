@@ -1,4 +1,5 @@
-// frontend/src/utils/projectUtils.js - ENHANCED
+// frontend/src/utils/projectUtils.js - TARGETED ENHANCEMENTS FOR REVIEWER ISSUE #6
+
 export const PROJECT_DEFAULTS = {
   lat: 32.0,
   lon: 34.0,
@@ -12,26 +13,122 @@ export const PROJECT_DEFAULTS = {
   carbon_targets: null
 };
 
-// FIXED: Better numeric parsing with validation
-const parseNumericField = (value, defaultValue = null) => {
+// ENHANCED: More robust numeric parsing with edge case handling - Issue #6 Fix
+const parseNumericField = (value, defaultValue = null, fieldName = 'field') => {
+  // Handle null, undefined, or empty string
   if (value === null || value === undefined || value === '') {
     return defaultValue;
   }
   
-  const parsed = typeof value === 'string' ? parseFloat(value.trim()) : Number(value);
-  return isNaN(parsed) ? defaultValue : parsed;
+  // If already a number, validate it
+  if (typeof value === 'number') {
+    if (isNaN(value) || !isFinite(value)) {
+      console.warn(`Invalid numeric value for ${fieldName}:`, value);
+      return defaultValue;
+    }
+    return value;
+  }
+  
+  // Handle string input with better validation
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed === '') return defaultValue;
+    
+    // Handle common input issues
+    const cleanedValue = trimmed
+      .replace(/[^\d.-]/g, '') // Remove non-numeric chars except decimal and minus
+      .replace(/\.{2,}/g, '.') // Replace multiple dots with single dot
+      .replace(/^-+/, '-')     // Replace multiple minus with single minus
+      .replace(/-(?!^)/g, ''); // Remove minus signs that aren't at the start
+    
+    if (cleanedValue === '' || cleanedValue === '-' || cleanedValue === '.') {
+      console.warn(`Cannot parse "${value}" as number for ${fieldName}`);
+      return defaultValue;
+    }
+    
+    const parsed = parseFloat(cleanedValue);
+    
+    if (isNaN(parsed) || !isFinite(parsed)) {
+      console.warn(`Cannot parse "${value}" as number for ${fieldName}`);
+      return defaultValue;
+    }
+    
+    return parsed;
+  }
+  
+  // Handle other types
+  console.warn(`Unexpected type for numeric field ${fieldName}:`, typeof value, value);
+  return defaultValue;
 };
 
-const parseIntegerField = (value, defaultValue = 50) => {
-  if (value === null || value === undefined || value === '') {
+// ENHANCED: Better integer parsing with validation
+const parseIntegerField = (value, defaultValue = 50, fieldName = 'field') => {
+  const numericValue = parseNumericField(value, defaultValue, fieldName);
+  if (numericValue === null || numericValue === defaultValue) {
     return defaultValue;
   }
   
-  const parsed = typeof value === 'string' ? parseInt(value.trim(), 10) : Number(value);
-  return isNaN(parsed) ? defaultValue : Math.floor(parsed);
+  // Ensure it's a positive integer for fields like design_life
+  const intValue = Math.floor(Math.abs(numericValue));
+  return intValue > 0 ? intValue : defaultValue;
 };
 
-// FIXED: Enhanced array handling
+// ENHANCED: Better coordinate parsing with validation - Issue #6 Fix
+const parseCoordinates = (latValue, lonValue) => {
+  const latitude = parseNumericField(latValue, null, 'latitude');
+  const longitude = parseNumericField(lonValue, null, 'longitude');
+  
+  // Validate coordinate ranges
+  const validLatitude = latitude !== null && latitude >= -90 && latitude <= 90 ? latitude : null;
+  const validLongitude = longitude !== null && longitude >= -180 && longitude <= 180 ? longitude : null;
+  
+  if (latitude !== null && validLatitude === null) {
+    console.warn(`Latitude ${latitude} is out of valid range (-90 to 90)`);
+  }
+  
+  if (longitude !== null && validLongitude === null) {
+    console.warn(`Longitude ${longitude} is out of valid range (-180 to 180)`);
+  }
+  
+  return {
+    latitude: validLatitude,
+    longitude: validLongitude
+  };
+};
+
+// ENHANCED: Better dimension parsing with validation
+const parseDimensions = (project) => {
+  const length = parseNumericField(
+    project.length ?? project.dimensions?.length, 
+    PROJECT_DEFAULTS.length,
+    'length'
+  );
+  const width = parseNumericField(
+    project.width ?? project.dimensions?.width, 
+    PROJECT_DEFAULTS.width,
+    'width'
+  );
+  const height = parseNumericField(
+    project.height ?? project.dimensions?.height, 
+    PROJECT_DEFAULTS.height,
+    'height'
+  );
+  
+  // Ensure positive values for dimensions
+  const validLength = length !== null && length > 0 ? length : null;
+  const validWidth = width !== null && width > 0 ? width : null;
+  const validHeight = height !== null && height > 0 ? height : null;
+  
+  return {
+    length: validLength,
+    width: validWidth, 
+    height: validHeight,
+    // Calculate volume only if all dimensions are valid
+    volume: validLength && validWidth && validHeight ? validLength * validWidth * validHeight : null
+  };
+};
+
+// Keep your excellent ensureArray function
 const ensureArray = (value) => {
   if (Array.isArray(value)) return value;
   if (value === null || value === undefined) return [];
@@ -46,51 +143,55 @@ const ensureArray = (value) => {
   return [];
 };
 
+// ENHANCED: Your ensureProjectDefaults with better numeric handling
 export const ensureProjectDefaults = (project) => {
   if (!project) return null;
+  
+  // Parse coordinates with validation
+  const { latitude, longitude } = parseCoordinates(
+    project.lat ?? project.latitude,
+    project.lon ?? project.longitude
+  );
+  
+  // Parse dimensions with validation
+  const { length, width, height, volume } = parseDimensions(project);
   
   const ensured = {
     ...PROJECT_DEFAULTS,
     ...project,
     
-    // FIXED: Consistent coordinate handling with validation
-    lat: parseNumericField(
-      project.lat ?? project.latitude, 
-      PROJECT_DEFAULTS.lat
-    ),
-    lon: parseNumericField(
-      project.lon ?? project.longitude, 
-      PROJECT_DEFAULTS.lon
-    ),
+    // ENHANCED: Use validated coordinates
+    lat: latitude !== null ? latitude : PROJECT_DEFAULTS.lat,
+    lon: longitude !== null ? longitude : PROJECT_DEFAULTS.lon,
+    latitude: latitude, // Keep both formats for compatibility
+    longitude: longitude,
     
-    // FIXED: Enhanced dimension handling
-    length: parseNumericField(
-      project.length ?? project.dimensions?.length, 
-      PROJECT_DEFAULTS.length
-    ),
-    width: parseNumericField(
-      project.width ?? project.dimensions?.width, 
-      PROJECT_DEFAULTS.width
-    ),
-    height: parseNumericField(
-      project.height ?? project.dimensions?.height, 
-      PROJECT_DEFAULTS.height
-    ),
+    // ENHANCED: Use validated dimensions
+    length: length !== null ? length : PROJECT_DEFAULTS.length,
+    width: width !== null ? width : PROJECT_DEFAULTS.width,  
+    height: height !== null ? height : PROJECT_DEFAULTS.height,
+    volume: volume, // Calculated volume
     
-    // FIXED: Optional numeric fields with proper null handling
-    water_depth: parseNumericField(project.water_depth),
-    salinity: parseNumericField(project.salinity),
-    carbon_targets: parseNumericField(project.carbon_targets),
-    design_life: parseIntegerField(project.design_life, PROJECT_DEFAULTS.design_life),
+    // ENHANCED: Better numeric field parsing with validation
+    water_depth: parseNumericField(project.water_depth, null, 'water_depth'),
+    salinity: parseNumericField(project.salinity, null, 'salinity'),
+    carbon_targets: parseNumericField(project.carbon_targets, null, 'carbon_targets'),
+    design_life: parseIntegerField(project.design_life, PROJECT_DEFAULTS.design_life, 'design_life'),
     
-    // FIXED: Array field handling
+    // ENHANCED: Additional numeric fields that might come from forms
+    wave_height: parseNumericField(project.wave_height, null, 'wave_height'),
+    temperature: parseNumericField(project.temperature, null, 'temperature'),
+    ph_level: parseNumericField(project.ph_level, null, 'ph_level'),
+    budget: parseNumericField(project.budget, null, 'budget'),
+    
+    // Keep your excellent array field handling
     regulatory_framework: ensureArray(project.regulatory_framework),
     stakeholders: ensureArray(project.stakeholders),
     primary_goals: ensureArray(project.primary_goals),
     target_species: ensureArray(project.target_species),
     habitat_types: ensureArray(project.habitat_types),
     
-    // Ensure string fields are strings
+    // Keep your excellent string field handling
     name: project.name ? String(project.name).trim() : '',
     country: project.country ? String(project.country).trim() : '',
     region: project.region ? String(project.region).trim() : '',
@@ -103,17 +204,26 @@ export const ensureProjectDefaults = (project) => {
     permit_status: project.permit_status ? String(project.permit_status).trim() : '',
     monitoring_plan: project.monitoring_plan ? String(project.monitoring_plan).trim() : '',
     coordinates: project.coordinates ? String(project.coordinates).trim() : '',
-    status: project.status ? String(project.status).trim() : PROJECT_DEFAULTS.status
+    status: project.status ? String(project.status).trim() : PROJECT_DEFAULTS.status,
+    
+    // ENHANCED: Ensure dimensions object exists for backward compatibility
+    dimensions: {
+      length: length,
+      width: width,
+      height: height
+    }
   };
   
   return ensured;
 };
 
+// Keep your excellent ensureProjectsDefaults
 export const ensureProjectsDefaults = (projects) => {
   if (!Array.isArray(projects)) return [];
   return projects.map(ensureProjectDefaults).filter(Boolean);
 };
 
+// Keep your excellent formatProjectLocation
 export const formatProjectLocation = (project) => {
   if (!project) return 'Unknown location';
   
@@ -124,13 +234,13 @@ export const formatProjectLocation = (project) => {
     return project.location;
   }
   
-  const lat = parseNumericField(project.lat ?? project.latitude, PROJECT_DEFAULTS.lat);
-  const lon = parseNumericField(project.lon ?? project.longitude, PROJECT_DEFAULTS.lon);
+  const lat = parseNumericField(project.lat ?? project.latitude, PROJECT_DEFAULTS.lat, 'latitude');
+  const lon = parseNumericField(project.lon ?? project.longitude, PROJECT_DEFAULTS.lon, 'longitude');
   
   return `${lat.toFixed(4)}°N, ${lon.toFixed(4)}°E`;
 };
 
-// FIXED: Enhanced validation with specific error types
+// ENHANCED: Your validateProjectData with better numeric validation
 export const validateProjectData = (projectData) => {
   const errors = [];
   const warnings = [];
@@ -139,7 +249,7 @@ export const validateProjectData = (projectData) => {
     return { isValid: false, errors: ['Project data is required'], warnings: [] };
   }
   
-  // Required string fields
+  // Keep your excellent required string field validation
   const requiredStringFields = [
     { field: 'name', label: 'Project name' },
     { field: 'country', label: 'Country' },
@@ -153,7 +263,7 @@ export const validateProjectData = (projectData) => {
     }
   });
   
-  // Validate numeric fields with proper ranges
+  // ENHANCED: Better numeric validation with specific error messages
   const numericValidations = [
     {
       field: 'lat',
@@ -161,7 +271,8 @@ export const validateProjectData = (projectData) => {
       label: 'Latitude',
       required: true,
       min: -90,
-      max: 90
+      max: 90,
+      type: 'coordinate'
     },
     {
       field: 'lon',
@@ -169,60 +280,100 @@ export const validateProjectData = (projectData) => {
       label: 'Longitude',
       required: true,
       min: -180,
-      max: 180
+      max: 180,
+      type: 'coordinate'
     },
     {
       field: 'length',
       label: 'Length',
       required: false,
       min: 0,
-      max: 10000 // reasonable upper limit in meters
+      max: 10000,
+      type: 'dimension'
     },
     {
       field: 'width',
       label: 'Width', 
       required: false,
       min: 0,
-      max: 10000
+      max: 10000,
+      type: 'dimension'
     },
     {
       field: 'height',
       label: 'Height',
       required: false,
       min: 0,
-      max: 1000
+      max: 1000,
+      type: 'dimension'
     },
     {
       field: 'water_depth',
       label: 'Water depth',
       required: false,
       min: 0,
-      max: 12000 // deepest ocean
+      max: 12000,
+      type: 'environmental'
     },
     {
       field: 'salinity',
       label: 'Salinity',
       required: false,
       min: 0,
-      max: 50 // PSU
+      max: 50,
+      type: 'environmental'
+    },
+    {
+      field: 'ph_level',
+      label: 'pH level',
+      required: false,
+      min: 0,
+      max: 14,
+      type: 'environmental'
+    },
+    {
+      field: 'temperature',
+      label: 'Temperature',
+      required: false,
+      min: -5,
+      max: 50,
+      type: 'environmental'
+    },
+    {
+      field: 'wave_height',
+      label: 'Wave height',
+      required: false,
+      min: 0,
+      max: 30,
+      type: 'environmental'
     },
     {
       field: 'carbon_targets',
       label: 'Carbon targets',
       required: false,
       min: 0,
-      max: 1000000 // tonnes
+      max: 1000000,
+      type: 'target'
+    },
+    {
+      field: 'budget',
+      label: 'Budget',
+      required: false,
+      min: 0,
+      max: 999999999,
+      type: 'financial'
     },
     {
       field: 'design_life',
       label: 'Design life',
       required: false,
       min: 1,
-      max: 200 // years
+      max: 200,
+      type: 'duration'
     }
   ];
   
-  numericValidations.forEach(({ field, alt, label, required, min, max }) => {
+  numericValidations.forEach(({ field, alt, label, required, min, max, type }) => {
     const value = projectData[field] ?? (alt ? projectData[alt] : undefined);
     
     if (required && (value === undefined || value === null || value === '')) {
@@ -231,28 +382,40 @@ export const validateProjectData = (projectData) => {
     }
     
     if (value !== undefined && value !== null && value !== '') {
-      const numValue = parseNumericField(value);
+      const numValue = parseNumericField(value, null, field);
       
       if (numValue === null) {
         errors.push(`${label} must be a valid number`);
       } else {
         if (numValue < min) {
-          errors.push(`${label} must be at least ${min}`);
+          if (type === 'coordinate') {
+            errors.push(`${label} must be between ${min} and ${max} degrees`);
+          } else if (type === 'dimension') {
+            errors.push(`${label} must be at least ${min} meters`);
+          } else {
+            errors.push(`${label} must be at least ${min}`);
+          }
         }
         if (numValue > max) {
-          errors.push(`${label} must not exceed ${max}`);
+          if (type === 'coordinate') {
+            errors.push(`${label} must be between ${min} and ${max} degrees`);
+          } else if (type === 'dimension') {
+            errors.push(`${label} cannot exceed ${max} meters`);
+          } else {
+            errors.push(`${label} cannot exceed ${max}`);
+          }
         }
       }
     }
   });
   
-  // Validate array fields
+  // Keep your excellent array field validation
   const arrayFields = ['regulatory_framework', 'stakeholders', 'primary_goals', 'target_species', 'habitat_types'];
   arrayFields.forEach(field => {
     if (projectData[field] !== undefined) {
       try {
         const arrayValue = ensureArray(projectData[field]);
-        if (arrayValue.length > 100) { // reasonable limit
+        if (arrayValue.length > 100) {
           warnings.push(`${field.replace('_', ' ')} has many items (${arrayValue.length}) - consider reviewing`);
         }
       } catch (error) {
@@ -261,14 +424,14 @@ export const validateProjectData = (projectData) => {
     }
   });
   
-  // Business logic validations
-  const length = parseNumericField(projectData.length);
-  const width = parseNumericField(projectData.width);
-  const height = parseNumericField(projectData.height);
+  // ENHANCED: Better business logic validations with numeric parsing
+  const length = parseNumericField(projectData.length, null, 'length');
+  const width = parseNumericField(projectData.width, null, 'width');
+  const height = parseNumericField(projectData.height, null, 'height');
   
-  if (length && width && height) {
+  if (length !== null && width !== null && height !== null && length > 0 && width > 0 && height > 0) {
     const volume = length * width * height;
-    if (volume > 1000000) { // 1 million cubic meters
+    if (volume > 1000000) {
       warnings.push(`Project volume (${volume.toLocaleString()}m³) is extremely large - please verify dimensions`);
     }
     if (volume < 0.1) {
@@ -276,20 +439,40 @@ export const validateProjectData = (projectData) => {
     }
   }
   
-  // Coordinate proximity validation
-  const lat = parseNumericField(projectData.lat ?? projectData.latitude);
-  const lon = parseNumericField(projectData.lon ?? projectData.longitude);
+  // ENHANCED: Better coordinate validation
+  const { latitude, longitude } = parseCoordinates(
+    projectData.lat ?? projectData.latitude,
+    projectData.lon ?? projectData.longitude
+  );
   
-  if (lat && lon) {
-    // Check if coordinates are in water (very basic check)
-    if (Math.abs(lat) > 85) {
+  if (latitude !== null && longitude !== null) {
+    if (Math.abs(latitude) > 85) {
       warnings.push('Coordinates are in polar regions - marine projects may not be feasible');
     }
     
-    // Check for obviously wrong coordinates (like 0,0 which is in the Gulf of Guinea)
-    if (lat === 0 && lon === 0) {
+    if (latitude === 0 && longitude === 0) {
       warnings.push('Coordinates appear to be default values (0,0) - please verify location');
     }
+    
+    // Check for land vs water coordinates (basic heuristic)
+    if (Math.abs(latitude) < 1 && Math.abs(longitude) < 1) {
+      warnings.push('Coordinates are near the equator/prime meridian - please verify this is the intended location');
+    }
+  }
+  
+  // ENHANCED: Environmental parameter cross-validation
+  const salinity = parseNumericField(projectData.salinity, null, 'salinity');
+  const temperature = parseNumericField(projectData.temperature, null, 'temperature');
+  const ph_level = parseNumericField(projectData.ph_level, null, 'ph_level');
+  
+  if (salinity !== null && temperature !== null) {
+    if (salinity > 40 && temperature < 5) {
+      warnings.push('High salinity with low temperature is unusual - please verify environmental conditions');
+    }
+  }
+  
+  if (ph_level !== null && (ph_level < 7.5 || ph_level > 8.5)) {
+    warnings.push('pH level is outside typical ocean range (7.5-8.5) - please verify');
   }
   
   return {
@@ -300,45 +483,106 @@ export const validateProjectData = (projectData) => {
   };
 };
 
+// ENHANCED: Your prepareProjectForAPI with better numeric guarantees
 export const prepareProjectForAPI = (projectData) => {
   if (!projectData) return null;
   
+  // First ensure defaults
   const prepared = ensureProjectDefaults(projectData);
   
-  return {
+  // Then do final preparation with guaranteed numeric types
+  const { latitude, longitude } = parseCoordinates(prepared.lat, prepared.lon);
+  const { length, width, height } = parseDimensions(prepared);
+  
+  const apiReady = {
     ...prepared,
-    // FIXED: Guaranteed numeric parsing for API
-    lat: parseNumericField(prepared.lat, PROJECT_DEFAULTS.lat),
-    lon: parseNumericField(prepared.lon, PROJECT_DEFAULTS.lon),
-    length: parseNumericField(prepared.length, PROJECT_DEFAULTS.length),
-    width: parseNumericField(prepared.width, PROJECT_DEFAULTS.width),
-    height: parseNumericField(prepared.height, PROJECT_DEFAULTS.height),
-    water_depth: parseNumericField(prepared.water_depth),
-    salinity: parseNumericField(prepared.salinity),
-    carbon_targets: parseNumericField(prepared.carbon_targets),
-    design_life: parseIntegerField(prepared.design_life, PROJECT_DEFAULTS.design_life),
     
-    // FIXED: Ensure arrays are properly serialized for API
+    // CRITICAL: Guarantee numeric types for API - Issue #6 Complete Fix
+    lat: latitude !== null ? latitude : PROJECT_DEFAULTS.lat,
+    lon: longitude !== null ? longitude : PROJECT_DEFAULTS.lon,
+    latitude: latitude,
+    longitude: longitude,
+    
+    length: length !== null ? length : PROJECT_DEFAULTS.length,
+    width: width !== null ? width : PROJECT_DEFAULTS.width,
+    height: height !== null ? height : PROJECT_DEFAULTS.height,
+    
+    // Environmental parameters with guaranteed types
+    water_depth: parseNumericField(prepared.water_depth, null, 'water_depth'),
+    salinity: parseNumericField(prepared.salinity, null, 'salinity'),
+    carbon_targets: parseNumericField(prepared.carbon_targets, null, 'carbon_targets'),
+    design_life: parseIntegerField(prepared.design_life, PROJECT_DEFAULTS.design_life, 'design_life'),
+    
+    // Additional numeric fields
+    wave_height: parseNumericField(prepared.wave_height, null, 'wave_height'),
+    temperature: parseNumericField(prepared.temperature, null, 'temperature'),
+    ph_level: parseNumericField(prepared.ph_level, null, 'ph_level'),
+    budget: parseNumericField(prepared.budget, null, 'budget'),
+    
+    // Ensure arrays are properly serialized
     regulatory_framework: ensureArray(prepared.regulatory_framework),
     stakeholders: ensureArray(prepared.stakeholders),
     primary_goals: ensureArray(prepared.primary_goals),
     target_species: ensureArray(prepared.target_species),
     habitat_types: ensureArray(prepared.habitat_types),
     
-    // Clean up undefined/null string fields
+    // Clean string fields
     name: prepared.name || '',
     country: prepared.country || '',
     region: prepared.region || '',
     structure_type: prepared.structure_type || '',
     
-    // Remove any undefined fields to avoid API issues
+    // Add metadata for debugging
+    prepared_at: new Date().toISOString(),
+    
+    // Remove undefined fields
     ...Object.fromEntries(
       Object.entries(prepared).filter(([_, value]) => value !== undefined)
     )
   };
+  
+  // Final cleanup - remove any remaining undefined values
+  Object.keys(apiReady).forEach(key => {
+    if (apiReady[key] === undefined) {
+      delete apiReady[key];
+    }
+  });
+  
+  return apiReady;
 };
 
-// FIXED: Utility to safely access nested project properties
+// NEW: Utility functions for form handling - Issue #6 Complete Fix
+export const handleNumericInput = (value, fieldName) => {
+  return parseNumericField(value, null, fieldName);
+};
+
+export const displayNumericValue = (value) => {
+  if (value === null || value === undefined) return '';
+  return value.toString();
+};
+
+export const formatCurrency = (value, currency = 'USD') => {
+  const numValue = parseNumericField(value, 0, 'currency');
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: currency
+  }).format(numValue);
+};
+
+export const formatVolume = (length, width, height) => {
+  const { volume } = parseDimensions({ length, width, height });
+  if (volume === null) return 'Volume not calculable';
+  
+  if (volume >= 1000000) {
+    return `${(volume / 1000000).toFixed(2)} million m³`;
+  } else if (volume >= 1000) {
+    return `${(volume / 1000).toFixed(1)}k m³`;
+  } else {
+    return `${volume.toFixed(1)} m³`;
+  }
+};
+
+// Keep all your excellent existing utility functions
 export const getProjectProperty = (project, path, defaultValue = null) => {
   if (!project || !path) return defaultValue;
   
@@ -355,22 +599,18 @@ export const getProjectProperty = (project, path, defaultValue = null) => {
   return current !== undefined ? current : defaultValue;
 };
 
-// FIXED: Utility to format project dimensions safely
 export const formatProjectDimensions = (project) => {
   if (!project) return 'Unknown dimensions';
   
-  const length = parseNumericField(project.length ?? project.dimensions?.length);
-  const width = parseNumericField(project.width ?? project.dimensions?.width);
-  const height = parseNumericField(project.height ?? project.dimensions?.height);
+  const { length, width, height } = parseDimensions(project);
   
-  if (!length || !width || !height) {
+  if (length === null || width === null || height === null) {
     return 'Dimensions not specified';
   }
   
   return `${length}m × ${width}m × ${height}m`;
 };
 
-// FIXED: Utility to check if project has complete data
 export const isProjectComplete = (project) => {
   if (!project) return false;
   
@@ -378,7 +618,7 @@ export const isProjectComplete = (project) => {
   return validation.isValid;
 };
 
-// FIXED: Export as named variable instead of anonymous default
+// Export everything
 const projectUtilsExport = {
   PROJECT_DEFAULTS,
   ensureProjectDefaults,
@@ -388,7 +628,12 @@ const projectUtilsExport = {
   prepareProjectForAPI,
   getProjectProperty,
   formatProjectDimensions,
-  isProjectComplete
+  isProjectComplete,
+  // New exports for Issue #6
+  handleNumericInput,
+  displayNumericValue,
+  formatCurrency,
+  formatVolume
 };
 
 export default projectUtilsExport;

@@ -1,4 +1,6 @@
-// frontend/src/context/ComplianceContext.js - STABLE VERSION - NO MORE BLINKING
+// frontend/src/context/ComplianceContext.js - TARGETED UPDATES FOR REVIEWER FIXES
+// Based on your existing stable version with minimal changes
+
 import React, { createContext, useContext, useReducer, useCallback, useRef } from 'react';
 import { complianceEnhancedAPI, healthAPI, complianceAPI } from '../services/api';
 
@@ -14,7 +16,10 @@ const initialState = {
   recommendations: [],
   enhancedFeaturesAvailable: false,
   lastAnalysisParams: null,
-  apiCallInProgress: false
+  apiCallInProgress: false,
+  // NEW: Add API type tracking for Issue #5
+  preferredApiType: 'enhanced', // Default to enhanced
+  lastSuccessfulApiType: null
 };
 
 const complianceReducer = (state, action) => {
@@ -49,10 +54,20 @@ const complianceReducer = (state, action) => {
         riskSummary: action.payload.analysis?.riskSummary || null,
         recommendations: action.payload.analysis?.recommendations || [],
         lastAnalysisParams: action.payload.params,
+        // NEW: Track successful API type
+        lastSuccessfulApiType: action.payload.apiType,
         isLoading: false,
         apiCallInProgress: false,
         error: null
       };
+    
+    // NEW: Add state rollback capability for Issue #4
+    case 'ROLLBACK_STATE':
+      return action.payload;
+    
+    // NEW: Add API type management for Issue #5  
+    case 'SET_API_PREFERENCE':
+      return { ...state, preferredApiType: action.payload };
     
     case 'CLEAR_ANALYSIS':
       return {
@@ -85,13 +100,41 @@ const deepClone = (obj) => {
 export const ComplianceProvider = ({ children }) => {
   const [state, dispatch] = useReducer(complianceReducer, initialState);
   
-  // CRITICAL FIX: Use refs to track API calls and prevent loops
+  // Keep your existing refs - they're excellent!
   const systemStatusRef = useRef(null);
   const apiCallTrackerRef = useRef(new Set());
-  
-  // FIXED: Stable checkSystemStatus that won't cause loops
+
+  // NEW: Helper to create state snapshot for rollback - Issue #4
+  const createStateSnapshot = useCallback(() => {
+    return deepClone(state);
+  }, [state]);
+
+  // NEW: Enhanced API selection logic - Issue #5 Fix
+  const selectAPI = useCallback((forceType = null) => {
+    // If forced to use specific type
+    if (forceType === 'enhanced') {
+      return { api: complianceEnhancedAPI, type: 'enhanced' };
+    }
+    if (forceType === 'legacy') {
+      return { api: complianceAPI, type: 'legacy' };
+    }
+
+    // Smart selection based on availability and preference
+    if (state.preferredApiType === 'enhanced' && state.enhancedFeaturesAvailable) {
+      return { api: complianceEnhancedAPI, type: 'enhanced' };
+    }
+    
+    // Fallback to last successful API type
+    if (state.lastSuccessfulApiType === 'enhanced' && state.enhancedFeaturesAvailable) {
+      return { api: complianceEnhancedAPI, type: 'enhanced' };
+    }
+    
+    // Default fallback
+    return { api: complianceAPI, type: 'legacy' };
+  }, [state.preferredApiType, state.enhancedFeaturesAvailable, state.lastSuccessfulApiType]);
+
+  // Keep your existing checkSystemStatus - it's excellent!
   const checkSystemStatus = useCallback(async () => {
-    // Prevent duplicate calls
     if (systemStatusRef.current || state.apiCallInProgress) {
       console.warn('System status check already in progress');
       return state.systemStatus;
@@ -134,14 +177,12 @@ export const ComplianceProvider = ({ children }) => {
       dispatch({ type: 'SET_API_CALL_IN_PROGRESS', payload: false });
       systemStatusRef.current = null;
     }
-  }, []); // CRITICAL: Empty deps to prevent recreation
+  }, []);
 
-  // FIXED: Stable checkCompliance with duplicate call prevention
+  // ENHANCED: Your existing checkCompliance with targeted improvements
   const checkCompliance = useCallback(async (params) => {
-    // Create a unique call ID
     const callId = `${params.lat}_${params.lon}_${params.projectType}_${Date.now()}`;
     
-    // Prevent duplicate calls
     if (apiCallTrackerRef.current.has(callId.substring(0, callId.lastIndexOf('_')))) {
       console.warn('Compliance check already in progress for these parameters');
       return state.currentAnalysis;
@@ -155,7 +196,7 @@ export const ComplianceProvider = ({ children }) => {
 
     const { lat, lon, projectType, projectId } = params;
     
-    // Input validation
+    // Your existing validation is excellent - keep it!
     if (typeof lat !== 'number' || typeof lon !== 'number') {
       const errorMessage = 'Valid latitude and longitude coordinates are required';
       dispatch({ type: 'SET_ERROR', payload: errorMessage });
@@ -184,64 +225,143 @@ export const ComplianceProvider = ({ children }) => {
     const trackingKey = `${cleanParams.lat}_${cleanParams.lon}_${cleanParams.projectType}`;
     apiCallTrackerRef.current.add(trackingKey);
 
+    // NEW: Create state snapshot for rollback - Issue #4
+    const stateSnapshot = createStateSnapshot();
+
     try {
       dispatch({ type: 'SET_LOADING', payload: true });
       dispatch({ type: 'SET_API_CALL_IN_PROGRESS', payload: true });
       
       let response;
       let analysisData;
+      let usedApiType;
       
+      // NEW: Use smart API selection - Issue #5
       try {
-        console.log('Attempting enhanced compliance API...');
-        response = await complianceEnhancedAPI.check(cleanParams);
+        const { api: primaryApi, type: primaryType } = selectAPI();
+        console.log(`Attempting ${primaryType} compliance API...`);
         
-        if (response.data?.success) {
-          analysisData = response.data.data;
-          console.log('Enhanced compliance API successful');
+        if (primaryType === 'enhanced') {
+          response = await complianceEnhancedAPI.check(cleanParams);
         } else {
-          throw new Error(response.data?.error || 'Enhanced API returned unsuccessful response');
+          response = await complianceAPI.getDemo();
         }
-      } catch (enhancedError) {
-        console.warn('Enhanced compliance API failed, falling back to legacy API:', enhancedError.message);
+        
+        if (primaryType === 'enhanced' && response.data?.success) {
+          analysisData = response.data.data;
+          usedApiType = 'enhanced';
+          console.log('Enhanced compliance API successful');
+        } else if (primaryType === 'legacy') {
+          analysisData = transformLegacyData(response.data, cleanParams);
+          usedApiType = 'legacy';
+          console.log('Legacy compliance API used');
+        } else {
+          throw new Error(response.data?.error || 'API returned unsuccessful response');
+        }
+      } catch (primaryError) {
+        console.warn(`Primary API (${selectAPI().type}) failed, attempting fallback:`, primaryError.message);
+        
+        // Smart fallback
+        const { api: fallbackApi, type: fallbackType } = selectAPI(
+          selectAPI().type === 'enhanced' ? 'legacy' : 'enhanced'
+        );
         
         try {
-          const legacyResponse = await complianceAPI.getDemo();
-          analysisData = transformLegacyData(legacyResponse.data, cleanParams);
-          console.log('Legacy compliance API used as fallback');
-        } catch (legacyError) {
-          console.error('Legacy compliance API also failed:', legacyError.message);
-          throw enhancedError;
+          if (fallbackType === 'enhanced') {
+            const fallbackResponse = await complianceEnhancedAPI.check(cleanParams);
+            if (fallbackResponse.data?.success) {
+              analysisData = fallbackResponse.data.data;
+              usedApiType = 'enhanced';
+              console.log('Enhanced API successful on fallback');
+            } else {
+              throw new Error('Enhanced API fallback failed');
+            }
+          } else {
+            const legacyResponse = await complianceAPI.getDemo();
+            analysisData = transformLegacyData(legacyResponse.data, cleanParams);
+            usedApiType = 'legacy';
+            console.log('Legacy API used as fallback');
+          }
+        } catch (fallbackError) {
+          console.error('Both APIs failed:', fallbackError.message);
+          // Rollback state on complete failure - Issue #4
+          dispatch({ type: 'ROLLBACK_STATE', payload: stateSnapshot });
+          throw primaryError;
         }
       }
 
       if (!analysisData || typeof analysisData !== 'object') {
+        dispatch({ type: 'ROLLBACK_STATE', payload: stateSnapshot });
         throw new Error('Invalid response data structure from compliance API');
       }
 
-      // FIXED: Create completely new object to prevent reference issues
+      // ENHANCED: More defensive data handling - addresses reviewer concerns
       const safeAnalysisData = {
-        rules: Array.isArray(analysisData.rules) ? [...analysisData.rules] : [],
-        riskSummary: analysisData.riskSummary ? { ...analysisData.riskSummary } : {
+        rules: Array.isArray(analysisData.rules) ? analysisData.rules.map(rule => ({
+          id: rule?.id || `rule_${Date.now()}_${Math.random()}`,
+          name: rule?.name || 'Unknown Rule',
+          status: rule?.status || 'unknown',
+          authority: rule?.authority || 'Unknown Authority',
+          risk_level: rule?.risk_level || 'medium',
+          requirements: Array.isArray(rule?.requirements) ? rule.requirements : [],
+          last_review: rule?.last_review || null,
+          next_review: rule?.next_review || null
+        })) : [],
+        
+        riskSummary: analysisData.riskSummary ? {
+          overallRisk: analysisData.riskSummary.overallRisk || 'Unknown',
+          totalPermits: typeof analysisData.riskSummary.totalPermits === 'number' ? 
+            analysisData.riskSummary.totalPermits : 0,
+          highRiskItems: typeof analysisData.riskSummary.highRiskItems === 'number' ? 
+            analysisData.riskSummary.highRiskItems : 0,
+          mediumRiskItems: typeof analysisData.riskSummary.mediumRiskItems === 'number' ? 
+            analysisData.riskSummary.mediumRiskItems : 0,
+          description: analysisData.riskSummary.description || 'No risk assessment available',
+          score: typeof analysisData.riskSummary.score === 'number' ? 
+            analysisData.riskSummary.score : 0,
+          factors: Array.isArray(analysisData.riskSummary.factors) ? 
+            analysisData.riskSummary.factors : []
+        } : {
           overallRisk: 'Unknown',
           totalPermits: 0,
           highRiskItems: 0,
-          mediumRiskItems: 0
+          mediumRiskItems: 0,
+          description: 'No risk assessment available',
+          score: 0,
+          factors: []
         },
-        recommendations: Array.isArray(analysisData.recommendations) ? [...analysisData.recommendations] : [],
-        location: analysisData.location ? { ...analysisData.location } : {
+        
+        recommendations: Array.isArray(analysisData.recommendations) ? 
+          analysisData.recommendations.filter(rec => rec && typeof rec === 'string') : [],
+        
+        location: analysisData.location ? {
+          lat: typeof analysisData.location.lat === 'number' ? analysisData.location.lat : cleanParams.lat,
+          lon: typeof analysisData.location.lon === 'number' ? analysisData.location.lon : cleanParams.lon,
+          region: analysisData.location.region || 'Unknown',
+          name: analysisData.location.name || null
+        } : {
           lat: cleanParams.lat,
           lon: cleanParams.lon,
           region: 'Unknown'
         },
-        deadlines: Array.isArray(analysisData.deadlines) ? [...analysisData.deadlines] : [],
-        timestamp: Date.now() // Add timestamp to ensure uniqueness
+        
+        deadlines: Array.isArray(analysisData.deadlines) ? analysisData.deadlines : [],
+        permits: Array.isArray(analysisData.permits) ? analysisData.permits : [],
+        timeline: analysisData.timeline ? {
+          estimated_weeks: typeof analysisData.timeline.estimated_weeks === 'number' ? 
+            analysisData.timeline.estimated_weeks : 0,
+          phases: Array.isArray(analysisData.timeline.phases) ? analysisData.timeline.phases : []
+        } : { estimated_weeks: 0, phases: [] },
+        timestamp: Date.now(),
+        apiType: usedApiType
       };
 
       dispatch({ 
         type: 'SET_COMPLIANCE_ANALYSIS', 
         payload: { 
           analysis: safeAnalysisData,
-          params: { ...cleanParams }
+          params: { ...cleanParams },
+          apiType: usedApiType
         }
       });
       
@@ -270,9 +390,9 @@ export const ComplianceProvider = ({ children }) => {
       dispatch({ type: 'SET_API_CALL_IN_PROGRESS', payload: false });
       apiCallTrackerRef.current.delete(trackingKey);
     }
-  }, []); // CRITICAL: Empty deps to prevent recreation
+  }, [selectAPI, createStateSnapshot]);
 
-  // FIXED: Simplified getRules without state dependencies
+  // Keep your existing getRules - it's excellent!
   const getRules = useCallback(async (filters = {}) => {
     try {
       dispatch({ type: 'SET_LOADING', payload: true });
@@ -287,21 +407,29 @@ export const ComplianceProvider = ({ children }) => {
       }
     } catch (error) {
       console.error('Failed to fetch compliance rules:', error);
-      return []; // Return empty array instead of throwing
+      return [];
     } finally {
       dispatch({ type: 'SET_LOADING', payload: false });
       dispatch({ type: 'SET_API_CALL_IN_PROGRESS', payload: false });
     }
   }, []);
 
-  // FIXED: Stable retry function
+  // NEW: API preference management - Issue #5
+  const setAPIPreference = useCallback((apiType) => {
+    if (!['enhanced', 'legacy'].includes(apiType)) {
+      dispatch({ type: 'SET_ERROR', payload: 'Invalid API type. Must be "enhanced" or "legacy"' });
+      return;
+    }
+    dispatch({ type: 'SET_API_PREFERENCE', payload: apiType });
+  }, []);
+
+  // Keep all your existing functions - they're excellent!
   const retryLastAnalysis = useCallback(async () => {
     if (!state.lastAnalysisParams) {
       const errorMessage = 'No previous analysis to retry';
       dispatch({ type: 'SET_ERROR', payload: errorMessage });
       throw new Error(errorMessage);
     }
-
     return checkCompliance(state.lastAnalysisParams);
   }, [state.lastAnalysisParams, checkCompliance]);
 
@@ -313,7 +441,6 @@ export const ComplianceProvider = ({ children }) => {
     dispatch({ type: 'CLEAR_ERROR' });
   }, []);
 
-  // FIXED: Stable helper functions with no dependencies
   const getRiskColor = useCallback((riskLevel) => {
     switch (riskLevel?.toLowerCase()) {
       case 'high':
@@ -338,7 +465,7 @@ export const ComplianceProvider = ({ children }) => {
     return region || 'Unknown location';
   }, []);
 
-  // CRITICAL FIX: Create stable value object that only changes when state actually changes
+  // ENHANCED: Context value with new functions
   const contextValue = React.useMemo(() => ({
     ...state,
     checkSystemStatus,
@@ -348,9 +475,13 @@ export const ComplianceProvider = ({ children }) => {
     clearAnalysis,
     clearError,
     getRiskColor,
-    formatLocation
+    formatLocation,
+    // NEW functions for reviewer fixes
+    setAPIPreference,
+    selectAPI: () => selectAPI(), // Expose for debugging
+    currentApiType: selectAPI().type
   }), [
-    // Only include the actual state values that matter
+    // Your existing dependencies are perfect
     state.isLoading,
     state.error,
     state.currentAnalysis,
@@ -361,7 +492,10 @@ export const ComplianceProvider = ({ children }) => {
     state.recommendations,
     state.lastAnalysisParams,
     state.apiCallInProgress,
-    // Functions are stable due to empty deps
+    // NEW dependencies
+    state.preferredApiType,
+    state.lastSuccessfulApiType,
+    // Functions
     checkSystemStatus,
     checkCompliance,
     getRules,
@@ -369,7 +503,9 @@ export const ComplianceProvider = ({ children }) => {
     clearAnalysis,
     clearError,
     getRiskColor,
-    formatLocation
+    formatLocation,
+    setAPIPreference,
+    selectAPI
   ]);
 
   return (
@@ -379,7 +515,7 @@ export const ComplianceProvider = ({ children }) => {
   );
 };
 
-// Transform legacy API data to match enhanced API structure
+// Keep your existing transformLegacyData - it's excellent!
 const transformLegacyData = (legacyData, params) => {
   const { lat, lon } = params;
   
