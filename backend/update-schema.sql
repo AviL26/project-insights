@@ -1,34 +1,19 @@
 -- ECOncrete Project Insights Database Schema Update
 -- Complete schema with existing tables and new lookup tables for wizard APIs
--- Run this file to update your database: sqlite3 db/econcretedb.sqlite < update-schema.sql
+-- Run this file to update your database: sqlite3 your_database.db < update-schema.sql
 
 -- Enable foreign key constraints
 PRAGMA foreign_keys = ON;
 
--- Update existing projects table with additional columns
--- SQLite doesn't support IF NOT EXISTS with ALTER TABLE ADD COLUMN, so we'll handle errors gracefully
--- These will fail silently if columns already exist
-
--- Add new columns to projects table
-BEGIN;
-  -- Add type column
-  ALTER TABLE projects ADD COLUMN type TEXT DEFAULT 'breakwater';
-  
-  -- Add client information
-  ALTER TABLE projects ADD COLUMN client_name TEXT;
-  ALTER TABLE projects ADD COLUMN project_manager TEXT;
-  
-  -- Add cost tracking
-  ALTER TABLE projects ADD COLUMN estimated_cost REAL;
-  ALTER TABLE projects ADD COLUMN actual_cost REAL;
-  
-  -- Add timeline tracking
-  ALTER TABLE projects ADD COLUMN start_date TEXT;
-  ALTER TABLE projects ADD COLUMN completion_date TEXT;
-  
-  -- Add jurisdiction reference
-  ALTER TABLE projects ADD COLUMN jurisdiction_id INTEGER;
-COMMIT;
+-- Update existing projects table
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'breakwater';
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS client_name TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS project_manager TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS estimated_cost REAL;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS actual_cost REAL;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS start_date TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS completion_date TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS jurisdiction_id INTEGER;
 
 -- Materials Catalog - ECOncrete products and specifications
 CREATE TABLE IF NOT EXISTS materials_catalog (
@@ -42,7 +27,7 @@ CREATE TABLE IF NOT EXISTS materials_catalog (
   porosity_percent REAL,
   cost_per_m3 REAL,
   cost_per_unit REAL,
-  unit_type TEXT DEFAULT 'm3', -- 'm3', 'unit', 'kg', 'm2'
+  unit_type TEXT DEFAULT 'm3', -- 'm3', 'unit', 'kg'
   ecological_enhancement TEXT, -- JSON array of enhancement features
   typical_applications TEXT, -- JSON array of use cases
   size_specifications TEXT, -- JSON object with dimensions
@@ -213,96 +198,73 @@ CREATE TABLE IF NOT EXISTS project_materials (
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_materials_category ON materials_catalog(category);
 CREATE INDEX IF NOT EXISTS idx_materials_active ON materials_catalog(is_active);
-CREATE INDEX IF NOT EXISTS idx_materials_sort ON materials_catalog(sort_order);
 CREATE INDEX IF NOT EXISTS idx_structures_category ON structure_types(category);
 CREATE INDEX IF NOT EXISTS idx_structures_active ON structure_types(is_active);
-CREATE INDEX IF NOT EXISTS idx_structures_sort ON structure_types(sort_order);
 CREATE INDEX IF NOT EXISTS idx_jurisdictions_code ON jurisdictions(code);
 CREATE INDEX IF NOT EXISTS idx_jurisdictions_type ON jurisdictions(type);
 CREATE INDEX IF NOT EXISTS idx_jurisdictions_parent ON jurisdictions(parent_jurisdiction_id);
-CREATE INDEX IF NOT EXISTS idx_jurisdictions_active ON jurisdictions(is_active);
 CREATE INDEX IF NOT EXISTS idx_species_category ON species_database(category);
 CREATE INDEX IF NOT EXISTS idx_species_active ON species_database(is_active);
-CREATE INDEX IF NOT EXISTS idx_species_compatibility ON species_database(econcrete_compatibility);
 CREATE INDEX IF NOT EXISTS idx_requirements_jurisdiction ON regulatory_requirements(jurisdiction_id);
 CREATE INDEX IF NOT EXISTS idx_requirements_type ON regulatory_requirements(requirement_type);
-CREATE INDEX IF NOT EXISTS idx_requirements_active ON regulatory_requirements(is_active);
 CREATE INDEX IF NOT EXISTS idx_environmental_category ON environmental_factors(category);
-CREATE INDEX IF NOT EXISTS idx_environmental_active ON environmental_factors(is_active);
 CREATE INDEX IF NOT EXISTS idx_project_materials_project ON project_materials(project_id);
 CREATE INDEX IF NOT EXISTS idx_project_materials_material ON project_materials(material_id);
 
 -- Insert sample data for immediate testing
 
--- Sample Materials with comprehensive data
-INSERT OR IGNORE INTO materials_catalog (id, name, category, subcategory, description, density_kg_m3, cost_per_m3, unit_type, ecological_enhancement, typical_applications, is_active, sort_order) VALUES
-(1, 'ECOncrete Bio-Block Standard', 'ecological', 'bio_blocks', 'Standard bio-enhanced concrete block for marine applications with micro and macro textures to promote marine life colonization', 2400, 280, 'm3', '["micro_textures", "macro_textures", "calcium_carbonate_additives", "ph_buffering"]', '["breakwaters", "seawalls", "artificial_reefs", "marina_structures"]', 1, 1),
-(2, 'ECOncrete Armor Units Type A', 'protective', 'armor_units', 'Heavy-duty armor units for breakwater construction with enhanced ecological surface design', 2500, 320, 'unit', '["complex_surface_geometry", "bio_active_additives"]', '["breakwaters", "coastal_protection", "harbor_structures"]', 1, 2),
-(3, 'ECOncrete Tidal Pool Panels', 'ecological', 'texture_panels', 'Textured panels designed to enhance tidal pool formation and intertidal habitat creation', 2350, 380, 'm2', '["tidal_pool_geometry", "drainage_channels", "varied_substrate_depths"]', '["seawalls", "coastal_revetments", "shoreline_restoration"]', 1, 3),
-(4, 'Standard Marine Concrete', 'structural', 'standard_concrete', 'Traditional marine-grade concrete for basic structural applications', 2400, 150, 'm3', '[]', '["foundations", "basic_structures", "fill_material"]', 1, 4),
-(5, 'ECOncrete Hybrid Blocks', 'hybrid', 'bio_blocks', 'Combined protective and ecological concrete blocks offering both structural strength and marine habitat enhancement', 2450, 350, 'm3', '["dual_surface_design", "integrated_cavities", "reef_ball_features"]', '["multipurpose_structures", "living_breakwaters", "ecological_seawalls"]', 1, 5);
+-- Sample Materials
+INSERT OR IGNORE INTO materials_catalog (id, name, category, subcategory, description, density_kg_m3, cost_per_m3, unit_type, is_active) VALUES
+(1, 'ECOncrete Bio-Block Standard', 'ecological', 'bio_blocks', 'Standard bio-enhanced concrete block for marine applications', 2400, 280, 'm3', 1),
+(2, 'ECOncrete Armor Units Type A', 'protective', 'armor_units', 'Heavy-duty armor units for breakwater construction', 2500, 320, 'unit', 1),
+(3, 'ECOncrete Tidal Pool Panels', 'ecological', 'texture_panels', 'Textured panels designed to enhance tidal pool formation', 2350, 380, 'm2', 1),
+(4, 'Standard Marine Concrete', 'structural', 'standard_concrete', 'Traditional marine-grade concrete', 2400, 150, 'm3', 1);
 
--- Sample Structure Types with detailed specifications
-INSERT OR IGNORE INTO structure_types (id, name, category, description, wave_exposure_suitability, regulatory_complexity, typical_materials, lifespan_years, ecological_impact_rating, is_active, sort_order) VALUES
-(1, 'Breakwater', 'coastal_protection', 'Offshore structure designed to reduce wave energy and protect shorelines', 'high', 'medium', '[1, 2, 5]', 50, 'positive', 1, 1),
-(2, 'Seawall', 'coastal_protection', 'Vertical wall structure for direct shoreline protection against wave action', 'medium', 'high', '[1, 3, 4]', 40, 'neutral', 1, 2),
-(3, 'Marina Dock', 'marine_infrastructure', 'Floating or fixed dock structure for recreational and commercial vessel mooring', 'low', 'medium', '[1, 4]', 25, 'neutral', 1, 3),
-(4, 'Artificial Reef', 'ecological_restoration', 'Submerged structure specifically designed to enhance marine habitat and biodiversity', 'medium', 'high', '[1, 5]', 75, 'positive', 1, 4),
-(5, 'Living Shoreline', 'ecological_restoration', 'Natural and nature-based features that protect and stabilize the shoreline while providing habitat', 'low', 'medium', '[1, 3, 5]', 30, 'positive', 1, 5);
+-- Sample Structure Types
+INSERT OR IGNORE INTO structure_types (id, name, category, description, wave_exposure_suitability, regulatory_complexity, is_active) VALUES
+(1, 'Breakwater', 'coastal_protection', 'Offshore structure to reduce wave energy', 'high', 'medium', 1),
+(2, 'Seawall', 'coastal_protection', 'Vertical wall structure for shoreline protection', 'medium', 'high', 1),
+(3, 'Marina Dock', 'marine_infrastructure', 'Floating or fixed dock structure for boats', 'low', 'medium', 1),
+(4, 'Artificial Reef', 'ecological_restoration', 'Submerged structure to enhance marine habitat', 'medium', 'high', 1);
 
--- Sample Jurisdictions with regulatory details
-INSERT OR IGNORE INTO jurisdictions (id, name, code, type, regulatory_framework, primary_language, currency, approval_timeline_days, ecological_protection_level, is_active, sort_order) VALUES
-(1, 'Israel', 'IL', 'country', 'strict', 'Hebrew', 'ILS', 120, 'high', 1, 1),
-(2, 'United States', 'US', 'country', 'moderate', 'English', 'USD', 90, 'medium', 1, 2),
-(3, 'California', 'US-CA', 'state', 'strict', 'English', 'USD', 150, 'high', 1, 3),
-(4, 'Australia', 'AU', 'country', 'strict', 'English', 'AUD', 105, 'high', 1, 4),
-(5, 'New South Wales', 'AU-NSW', 'state', 'strict', 'English', 'AUD', 90, 'high', 1, 5),
-(6, 'European Union', 'EU', 'region', 'strict', 'Multiple', 'EUR', 180, 'high', 1, 6),
-(7, 'Spain', 'EU-ES', 'country', 'strict', 'Spanish', 'EUR', 120, 'high', 1, 7);
+-- Sample Jurisdictions
+INSERT OR IGNORE INTO jurisdictions (id, name, code, type, regulatory_framework, primary_language, currency, is_active) VALUES
+(1, 'Israel', 'IL', 'country', 'strict', 'Hebrew', 'ILS', 1),
+(2, 'United States', 'US', 'country', 'moderate', 'English', 'USD', 1),
+(3, 'California', 'US-CA', 'state', 'strict', 'English', 'USD', 1),
+(4, 'Australia', 'AU', 'country', 'strict', 'English', 'AUD', 1),
+(5, 'New South Wales', 'AU-NSW', 'state', 'strict', 'English', 'AUD', 1);
 
 -- Set parent relationships for sub-jurisdictions
 UPDATE jurisdictions SET parent_jurisdiction_id = 2 WHERE code = 'US-CA';
 UPDATE jurisdictions SET parent_jurisdiction_id = 4 WHERE code = 'AU-NSW';
-UPDATE jurisdictions SET parent_jurisdiction_id = 6 WHERE code = 'EU-ES';
 
--- Sample Species with ecological data
-INSERT OR IGNORE INTO species_database (id, scientific_name, common_name, category, habitat_type, conservation_status, econcrete_compatibility, colonization_potential, jurisdictions_present, is_active) VALUES
-(1, 'Balanus amphitrite', 'Striped Barnacle', 'crustacean', 'hard_substrate', 'least_concern', 'excellent', 'high', '[1, 2, 3, 4, 5]', 1),
-(2, 'Mytilus edulis', 'Blue Mussel', 'mollusk', 'hard_substrate', 'least_concern', 'excellent', 'high', '[2, 3, 4, 5, 6, 7]', 1),
-(3, 'Pocillopora damicornis', 'Cauliflower Coral', 'coral', 'reef', 'near_threatened', 'good', 'medium', '[1, 4]', 1),
-(4, 'Ulva lactuca', 'Sea Lettuce', 'algae', 'rocky_shore', 'least_concern', 'good', 'high', '[1, 2, 3, 4, 5, 6, 7]', 1),
-(5, 'Crassostrea gigas', 'Pacific Oyster', 'mollusk', 'hard_substrate', 'least_concern', 'excellent', 'high', '[2, 3, 4, 5]', 1),
-(6, 'Patella vulgata', 'Common Limpet', 'mollusk', 'rocky_shore', 'least_concern', 'good', 'medium', '[6, 7]', 1);
+-- Sample Species
+INSERT OR IGNORE INTO species_database (id, scientific_name, common_name, category, habitat_type, conservation_status, econcrete_compatibility, is_active) VALUES
+(1, 'Balanus amphitrite', 'Striped Barnacle', 'crustacean', 'hard_substrate', 'least_concern', 'excellent', 1),
+(2, 'Mytilus edulis', 'Blue Mussel', 'mollusk', 'hard_substrate', 'least_concern', 'excellent', 1),
+(3, 'Pocillopora damicornis', 'Cauliflower Coral', 'coral', 'reef', 'near_threatened', 'good', 1),
+(4, 'Ulva lactuca', 'Sea Lettuce', 'algae', 'rocky_shore', 'least_concern', 'good', 1);
 
 -- Sample Environmental Factors
-INSERT OR IGNORE INTO environmental_factors (id, name, category, measurement_unit, impact_on_design, regulatory_significance, is_active, sort_order) VALUES
-(1, 'Wave Height', 'physical', 'meters', 'high', 'critical', 1, 1),
-(2, 'Water Temperature', 'physical', 'celsius', 'medium', 'important', 1, 2),
-(3, 'Salinity', 'chemical', 'ppt', 'medium', 'moderate', 1, 3),
-(4, 'pH Level', 'chemical', 'pH units', 'medium', 'important', 1, 4),
-(5, 'Tidal Range', 'physical', 'meters', 'high', 'critical', 1, 5),
-(6, 'Current Velocity', 'physical', 'm/s', 'high', 'critical', 1, 6),
-(7, 'Water Depth', 'physical', 'meters', 'high', 'critical', 1, 7),
-(8, 'Dissolved Oxygen', 'chemical', 'mg/L', 'low', 'important', 1, 8),
-(9, 'Turbidity', 'physical', 'NTU', 'low', 'moderate', 1, 9),
-(10, 'Seasonal Temperature Variation', 'climatic', 'celsius', 'medium', 'moderate', 1, 10);
+INSERT OR IGNORE INTO environmental_factors (id, name, category, measurement_unit, impact_on_design, is_active) VALUES
+(1, 'Wave Height', 'physical', 'meters', 'high', 1),
+(2, 'Water Temperature', 'physical', 'celsius', 'medium', 1),
+(3, 'Salinity', 'chemical', 'ppt', 'medium', 1),
+(4, 'pH Level', 'chemical', 'pH units', 'medium', 1),
+(5, 'Tidal Range', 'physical', 'meters', 'high', 1),
+(6, 'Current Velocity', 'physical', 'm/s', 'high', 1);
 
 -- Sample Regulatory Requirements
-INSERT OR IGNORE INTO regulatory_requirements (id, jurisdiction_id, requirement_type, title, category, mandatory, processing_time_days, fees, is_active, sort_order) VALUES
-(1, 1, 'environmental_permit', 'Marine Environmental Impact Assessment', 'environmental', 1, 90, 5000, 1, 1),
-(2, 1, 'construction_permit', 'Coastal Construction Permit', 'construction', 1, 60, 3000, 1, 2),
-(3, 3, 'environmental_permit', 'California Coastal Development Permit', 'environmental', 1, 120, 8000, 1, 3),
-(4, 5, 'marine_permit', 'NSW Marine Parks Permit', 'marine', 1, 45, 2500, 1, 4),
-(5, 2, 'environmental_permit', 'US Army Corps of Engineers Permit', 'environmental', 1, 180, 15000, 1, 5),
-(6, 7, 'environmental_permit', 'Spanish Coastal Zone Management Permit', 'environmental', 1, 90, 6000, 1, 6),
-(7, 1, 'heritage_assessment', 'Archaeological Survey Requirements', 'heritage', 0, 30, 2000, 1, 7);
+INSERT OR IGNORE INTO regulatory_requirements (id, jurisdiction_id, requirement_type, title, category, mandatory, processing_time_days, is_active) VALUES
+(1, 1, 'environmental_permit', 'Marine Environmental Impact Assessment', 'environmental', 1, 90, 1),
+(2, 1, 'construction_permit', 'Coastal Construction Permit', 'construction', 1, 60, 1),
+(3, 3, 'environmental_permit', 'California Coastal Development Permit', 'environmental', 1, 120, 1),
+(4, 5, 'marine_permit', 'NSW Marine Parks Permit', 'marine', 1, 45, 1);
 
--- Update existing projects with sample jurisdiction assignments (after jurisdictions table is created)
--- Only update projects that don't have a jurisdiction_id yet
-UPDATE projects SET jurisdiction_id = 1 WHERE jurisdiction_id IS NULL AND (id % 3 = 1 OR id = 1);
-UPDATE projects SET jurisdiction_id = 2 WHERE jurisdiction_id IS NULL AND (id % 3 = 2 OR id = 2);  
-UPDATE projects SET jurisdiction_id = 4 WHERE jurisdiction_id IS NULL AND (id % 3 = 0 OR id > 2);
+-- Add foreign key constraint to projects table if not exists
+-- This needs to be done after jurisdictions table is created
+UPDATE projects SET jurisdiction_id = 1 WHERE jurisdiction_id IS NULL;
 
--- Optimize database performance
+-- Vacuum to optimize database
 VACUUM;
-ANALYZE;

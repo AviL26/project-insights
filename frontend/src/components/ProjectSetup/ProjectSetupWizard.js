@@ -1,8 +1,8 @@
-// frontend/src/components/ProjectSetup/ProjectSetupWizard.js
+// frontend/src/components/ProjectSetup/ProjectSetupWizard.js - FIXED NUMERIC HANDLING
 import React, { useState, useCallback, useMemo } from 'react';
 import { useProject } from '../../context/ProjectContext';
 import { useLookupData } from '../../hooks/useLookupData';
-import { validateProjectData, prepareProjectForAPI } from '../../utils/projectUtils';
+import { validateProjectData, prepareProjectForAPI, handleNumericInput, displayNumericValue } from '../../utils/projectUtils';
 import ErrorAlert from '../common/ErrorAlert';
 import { 
   ArrowRight, 
@@ -54,23 +54,23 @@ const ProjectSetupWizard = ({ onComplete, isModal = false, onClose }) => {
   const [stepValidation, setStepValidation] = useState({});
   const [isValidating, setIsValidating] = useState(false);
   
-  // Form data
+  // FIXED: Form data with proper initial types
   const [formData, setFormData] = useState({
     name: '',
     country_code: '',
     region_id: '',
     marine_zone_id: '',
     structure_type_id: '',
-    lat: '',
-    lon: '',
-    length: '',
-    width: '',
-    height: '',
-    water_depth: '',
+    lat: null,      // FIXED: null instead of string
+    lon: null,      // FIXED: null instead of string
+    length: null,   // FIXED: null instead of string
+    width: null,    // FIXED: null instead of string
+    height: null,   // FIXED: null instead of string
+    water_depth: null, // FIXED: null instead of string
     wave_exposure_id: '',
     seabed_type_id: '',
     primary_function: '',
-    design_life: '50',
+    design_life: 50,  // FIXED: number instead of string
     primary_goal_ids: [],
     regulatory_framework: [],
     stakeholders: [],
@@ -85,8 +85,8 @@ const ProjectSetupWizard = ({ onComplete, isModal = false, onClose }) => {
       country_code: countryCode,
       region_id: '',
       marine_zone_id: '',
-      lat: '',
-      lon: ''
+      lat: null,
+      lon: null
     }));
     
     if (countryCode) {
@@ -100,8 +100,8 @@ const ProjectSetupWizard = ({ onComplete, isModal = false, onClose }) => {
       ...prev,
       region_id: regionId,
       marine_zone_id: '',
-      lat: '',
-      lon: ''
+      lat: null,
+      lon: null
     }));
     
     if (regionId && formData.country_code) {
@@ -116,12 +116,61 @@ const ProjectSetupWizard = ({ onComplete, isModal = false, onClose }) => {
     setFormData(prev => ({
       ...prev,
       marine_zone_id: zoneId,
-      lat: selectedZone ? selectedZone.lat.toString() : '',
-      lon: selectedZone ? selectedZone.lon.toString() : ''
+      lat: selectedZone ? selectedZone.lat : null,      // FIXED: store as number
+      lon: selectedZone ? selectedZone.lon : null       // FIXED: store as number
     }));
   }, [getMarineZoneById]);
 
-  // Validation
+  // FIXED: Enhanced input change handler with proper type handling
+  const handleInputChange = useCallback((field, value) => {
+    console.log(`Updating ${field}:`, value, typeof value); // Debug log
+    
+    // Handle numeric fields with proper conversion
+    const numericFields = ['lat', 'lon', 'length', 'width', 'height', 'water_depth', 'design_life'];
+    
+    if (numericFields.includes(field)) {
+      const numericValue = handleNumericInput(value, field);
+      console.log(`Converted ${field} from "${value}" to:`, numericValue, typeof numericValue); // Debug log
+      
+      setFormData(prev => ({
+        ...prev,
+        [field]: numericValue
+      }));
+    } else {
+      // Handle string fields normally
+      setFormData(prev => ({
+        ...prev,
+        [field]: value
+      }));
+    }
+    
+    // Clear validation error for this field
+    setValidationErrors(prev => {
+      const newErrors = { ...prev };
+      delete newErrors[field];
+      return newErrors;
+    });
+    
+    // Validate after a short delay
+    setTimeout(() => {
+      const newData = { ...formData, [field]: numericFields.includes(field) ? handleNumericInput(value, field) : value };
+      validateStep(currentStep, newData);
+    }, 300);
+  }, [formData, currentStep]);
+
+  // FIXED: Display values properly in form inputs
+  const getDisplayValue = useCallback((field) => {
+    const value = formData[field];
+    const numericFields = ['lat', 'lon', 'length', 'width', 'height', 'water_depth', 'design_life'];
+    
+    if (numericFields.includes(field)) {
+      return displayNumericValue(value);
+    }
+    
+    return value || '';
+  }, [formData]);
+
+  // Validation (keep your existing validation logic but with minor fixes)
   const validateStep = useCallback(async (stepIndex, data = formData) => {
     setIsValidating(true);
     
@@ -150,31 +199,29 @@ const ProjectSetupWizard = ({ onComplete, isModal = false, onClose }) => {
           break;
           
         case 'location':
-          const hasCoordinates = data.lat && data.lon && data.lat.toString().trim() !== '' && data.lon.toString().trim() !== '';
+          const hasCoordinates = data.lat !== null && data.lon !== null;
           const hasMarineZone = data.marine_zone_id && data.marine_zone_id.trim() !== '';
           
           if (!hasCoordinates && !hasMarineZone) {
             stepErrors.location = 'Please select a marine zone or enter custom coordinates';
           } else if (hasCoordinates) {
-            const lat = parseFloat(data.lat);
-            const lon = parseFloat(data.lon);
-            
-            if (data.lat && (isNaN(lat) || lat < -90 || lat > 90)) {
+            // FIXED: Proper numeric validation
+            if (typeof data.lat !== 'number' || data.lat < -90 || data.lat > 90) {
               stepErrors.lat = 'Valid latitude is required (-90 to +90 degrees)';
             }
             
-            if (data.lon && (isNaN(lon) || lon < -180 || lon > 180)) {
+            if (typeof data.lon !== 'number' || data.lon < -180 || data.lon > 180) {
               stepErrors.lon = 'Valid longitude is required (-180 to +180 degrees)';
             }
             
-            if (!isNaN(lat) && !isNaN(lon)) {
-              if (lat === 0 && lon === 0) {
+            if (typeof data.lat === 'number' && typeof data.lon === 'number') {
+              if (data.lat === 0 && data.lon === 0) {
                 stepWarnings.coordinates = 'Coordinates (0,0) are in the Atlantic Ocean - please verify this is correct';
-              } else if (Math.abs(lat) < 0.001 && Math.abs(lon) < 0.001) {
+              } else if (Math.abs(data.lat) < 0.001 && Math.abs(data.lon) < 0.001) {
                 stepWarnings.coordinates = 'Coordinates very close to (0,0) - please verify location';
               }
               
-              if (lat > 85 || lat < -85) {
+              if (data.lat > 85 || data.lat < -85) {
                 stepWarnings.coordinates = 'Coordinates are in polar regions - unusual for marine infrastructure';
               }
             }
@@ -182,34 +229,24 @@ const ProjectSetupWizard = ({ onComplete, isModal = false, onClose }) => {
           break;
           
         case 'technical':
-          const length = parseFloat(data.length);
-          const width = parseFloat(data.width);
-          const height = parseFloat(data.height);
-          const waterDepth = parseFloat(data.water_depth);
+          // FIXED: Proper numeric validation for technical fields
+          const numericValidations = [
+            { field: 'length', min: 0, max: 10000, unit: 'meters' },
+            { field: 'width', min: 0, max: 10000, unit: 'meters' },
+            { field: 'height', min: 0, max: 1000, unit: 'meters' },
+            { field: 'water_depth', min: 0, max: 12000, unit: 'meters' }
+          ];
           
-          if (data.length && isNaN(length)) {
-            stepErrors.length = 'Length must be a valid number';
-          } else if (length && (length <= 0 || length > 10000)) {
-            stepErrors.length = 'Length must be between 0.1 and 10,000 meters';
-          }
-          
-          if (data.width && isNaN(width)) {
-            stepErrors.width = 'Width must be a valid number';
-          } else if (width && (width <= 0 || width > 10000)) {
-            stepErrors.width = 'Width must be between 0.1 and 10,000 meters';
-          }
-          
-          if (data.height && isNaN(height)) {
-            stepErrors.height = 'Height must be a valid number';
-          } else if (height && (height <= 0 || height > 1000)) {
-            stepErrors.height = 'Height must be between 0.1 and 1,000 meters';
-          }
-          
-          if (data.water_depth && isNaN(waterDepth)) {
-            stepErrors.water_depth = 'Water depth must be a valid number';
-          } else if (waterDepth && (waterDepth < 0 || waterDepth > 12000)) {
-            stepErrors.water_depth = 'Water depth must be between 0 and 12,000 meters';
-          }
+          numericValidations.forEach(({ field, min, max, unit }) => {
+            const value = data[field];
+            if (value !== null && value !== undefined) {
+              if (typeof value !== 'number' || isNaN(value)) {
+                stepErrors[field] = `${field.replace('_', ' ')} must be a valid number`;
+              } else if (value < min || value > max) {
+                stepErrors[field] = `${field.replace('_', ' ')} must be between ${min} and ${max} ${unit}`;
+              }
+            }
+          });
           break;
           
         case 'goals':
@@ -219,7 +256,9 @@ const ProjectSetupWizard = ({ onComplete, isModal = false, onClose }) => {
           break;
           
         case 'review':
-          if (!data.name || !data.country_code || !data.structure_type_id || (!data.lat && !data.marine_zone_id)) {
+          // FIXED: Check for required fields with proper types
+          if (!data.name || !data.country_code || !data.structure_type_id || 
+              (data.lat === null && !data.marine_zone_id)) {
             stepErrors.required_fields = 'All required fields must be completed before project creation';
           }
           break;
@@ -260,24 +299,6 @@ const ProjectSetupWizard = ({ onComplete, isModal = false, onClose }) => {
     return allStepsValid && !isSubmitting;
   }, [stepValidation, isSubmitting]);
 
-  const handleInputChange = useCallback((field, value) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: value
-    }));
-    
-    setValidationErrors(prev => {
-      const newErrors = { ...prev };
-      delete newErrors[field];
-      return newErrors;
-    });
-    
-    setTimeout(() => {
-      const newData = { ...formData, [field]: value };
-      validateStep(currentStep, newData);
-    }, 300);
-  }, [formData, currentStep, validateStep]);
-
   const handleArrayFieldChange = useCallback((field, values) => {
     setFormData(prev => ({
       ...prev,
@@ -314,12 +335,21 @@ const ProjectSetupWizard = ({ onComplete, isModal = false, onClose }) => {
     }
   }, [currentStep]);
 
+  // FIXED: Enhanced submit with better logging
   const handleSubmit = useCallback(async () => {
+    console.log('Submitting project with data:', formData); // Debug log
+    
     setSubmitError(null);
     setIsSubmitting(true);
     
     try {
+      // Log the data before preparation
+      console.log('Form data before preparation:', JSON.stringify(formData, null, 2));
+      
       const preparedData = prepareProjectForAPI(formData);
+      
+      // Log the prepared data
+      console.log('Prepared data for API:', JSON.stringify(preparedData, null, 2));
       
       if (!preparedData) {
         throw new Error('Failed to prepare project data for submission');
@@ -327,22 +357,23 @@ const ProjectSetupWizard = ({ onComplete, isModal = false, onClose }) => {
       
       const newProject = await createProject(preparedData);
       
+      // Reset form
       setFormData({
         name: '',
         country_code: '',
         region_id: '',
         marine_zone_id: '',
         structure_type_id: '',
-        lat: '',
-        lon: '',
-        length: '',
-        width: '',
-        height: '',
-        water_depth: '',
+        lat: null,
+        lon: null,
+        length: null,
+        width: null,
+        height: null,
+        water_depth: null,
         wave_exposure_id: '',
         seabed_type_id: '',
         primary_function: '',
-        design_life: '50',
+        design_life: 50,
         primary_goal_ids: [],
         regulatory_framework: [],
         stakeholders: [],
@@ -358,7 +389,20 @@ const ProjectSetupWizard = ({ onComplete, isModal = false, onClose }) => {
       
     } catch (error) {
       console.error('Project creation failed:', error);
-      setSubmitError(error.message || 'Failed to create project. Please check your data and try again.');
+      console.error('Error response:', error.response?.data); // Log the full error response
+      
+      let errorMessage = 'Failed to create project. Please check your data and try again.';
+      
+      if (error.response?.status === 400) {
+        const apiError = error.response.data;
+        if (apiError?.error) {
+          errorMessage = `Validation Error: ${apiError.error}`;
+        } else if (apiError?.errors) {
+          errorMessage = `Validation Errors: ${JSON.stringify(apiError.errors)}`;
+        }
+      }
+      
+      setSubmitError(errorMessage);
     } finally {
       setIsSubmitting(false);
     }
@@ -406,7 +450,7 @@ const ProjectSetupWizard = ({ onComplete, isModal = false, onClose }) => {
               </label>
               <input
                 type="text"
-                value={formData.name}
+                value={getDisplayValue('name')}
                 onChange={(e) => handleInputChange('name', e.target.value)}
                 className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors ${
                   stepErrors.name ? 'border-red-300 bg-red-50' : 'border-gray-300'
@@ -552,7 +596,7 @@ const ProjectSetupWizard = ({ onComplete, isModal = false, onClose }) => {
                   <input
                     type="number"
                     step="any"
-                    value={formData.lat}
+                    value={getDisplayValue('lat')}
                     onChange={(e) => handleInputChange('lat', e.target.value)}
                     className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors ${
                       stepErrors.lat ? 'border-red-300 bg-red-50' : 'border-gray-300'
@@ -571,7 +615,7 @@ const ProjectSetupWizard = ({ onComplete, isModal = false, onClose }) => {
                   <input
                     type="number"
                     step="any"
-                    value={formData.lon}
+                    value={getDisplayValue('lon')}
                     onChange={(e) => handleInputChange('lon', e.target.value)}
                     className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors ${
                       stepErrors.lon ? 'border-red-300 bg-red-50' : 'border-gray-300'
@@ -609,7 +653,7 @@ const ProjectSetupWizard = ({ onComplete, isModal = false, onClose }) => {
                   type="number"
                   step="0.1"
                   min="0"
-                  value={formData.length}
+                  value={getDisplayValue('length')}
                   onChange={(e) => handleInputChange('length', e.target.value)}
                   className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   placeholder="e.g., 100"
@@ -623,7 +667,7 @@ const ProjectSetupWizard = ({ onComplete, isModal = false, onClose }) => {
                   type="number"
                   step="0.1"
                   min="0"
-                  value={formData.width}
+                  value={getDisplayValue('width')}
                   onChange={(e) => handleInputChange('width', e.target.value)}
                   className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   placeholder="e.g., 20"
@@ -637,7 +681,7 @@ const ProjectSetupWizard = ({ onComplete, isModal = false, onClose }) => {
                   type="number"
                   step="0.1"
                   min="0"
-                  value={formData.height}
+                  value={getDisplayValue('height')}
                   onChange={(e) => handleInputChange('height', e.target.value)}
                   className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   placeholder="e.g., 5"
@@ -653,7 +697,7 @@ const ProjectSetupWizard = ({ onComplete, isModal = false, onClose }) => {
                   type="number"
                   step="0.1"
                   min="0"
-                  value={formData.water_depth}
+                  value={getDisplayValue('water_depth')}
                   onChange={(e) => handleInputChange('water_depth', e.target.value)}
                   className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   placeholder="e.g., 15"
@@ -667,7 +711,7 @@ const ProjectSetupWizard = ({ onComplete, isModal = false, onClose }) => {
                   type="number"
                   min="1"
                   max="200"
-                  value={formData.design_life}
+                  value={getDisplayValue('design_life')}
                   onChange={(e) => handleInputChange('design_life', e.target.value)}
                   className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   placeholder="50"
@@ -731,73 +775,103 @@ const ProjectSetupWizard = ({ onComplete, isModal = false, onClose }) => {
           </div>
         );
 
-case 'review':
-  const selectedCountryForReview = getCountryByCode(formData.country_code);
-  const selectedStructureType = structureTypes.find(t => t.id === formData.structure_type_id);
-  
-  return (
-    <div className="space-y-6">
-      <div className="bg-white border border-gray-200 rounded-lg p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Project Summary</h3>
+      case 'review':
+        const selectedCountryForReview = getCountryByCode(formData.country_code);
+        const selectedStructureType = structureTypes.find(t => t.id === formData.structure_type_id);
         
-        <div className="space-y-4">
-          <div>
-            <h4 className="font-medium text-gray-900">Basic Information</h4>
-            <p><strong>Name:</strong> {formData.name || 'Not specified'}</p>
-            <p><strong>Country:</strong> {selectedCountryForReview?.name || 'Not specified'}</p>
-            <p><strong>Structure:</strong> {selectedStructureType?.name || 'Not specified'}</p>
-          </div>
+        return (
+          <div className="space-y-6">
+            <div className="bg-white border border-gray-200 rounded-lg p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Project Summary</h3>
+              
+              <div className="space-y-4">
+                <div>
+                  <h4 className="font-medium text-gray-900">Basic Information</h4>
+                  <p><strong>Name:</strong> {formData.name || 'Not specified'}</p>
+                  <p><strong>Country:</strong> {selectedCountryForReview?.name || 'Not specified'}</p>
+                  <p><strong>Structure:</strong> {selectedStructureType?.name || 'Not specified'}</p>
+                </div>
 
-          <div>
-            <h4 className="font-medium text-gray-900">Location</h4>
-            <p><strong>Coordinates:</strong> {formData.lat && formData.lon ? `${formData.lat}°, ${formData.lon}°` : 'Not specified'}</p>
-          </div>
+                <div>
+                  <h4 className="font-medium text-gray-900">Location</h4>
+                  <p><strong>Coordinates:</strong> {formData.lat !== null && formData.lon !== null ? `${formData.lat}°, ${formData.lon}°` : 'Not specified'}</p>
+                </div>
 
-          {formData.primary_goal_ids.length > 0 && (
-            <div>
-              <h4 className="font-medium text-gray-900">Goals</h4>
-              <div className="flex flex-wrap gap-2">
-                {formData.primary_goal_ids.map(goalId => {
-                  const goal = primaryGoals.find(g => g.id === goalId);
-                  return goal ? (
-                    <span key={goalId} className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm">
-                      {goal.name}
-                    </span>
-                  ) : null;
-                })}
+                <div>
+                  <h4 className="font-medium text-gray-900">Technical Specifications</h4>
+                  {formData.length !== null && (
+                    <p><strong>Length:</strong> {formData.length}m</p>
+                  )}
+                  {formData.width !== null && (
+                    <p><strong>Width:</strong> {formData.width}m</p>
+                  )}
+                  {formData.height !== null && (
+                    <p><strong>Height:</strong> {formData.height}m</p>
+                  )}
+                  {formData.water_depth !== null && (
+                    <p><strong>Water Depth:</strong> {formData.water_depth}m</p>
+                  )}
+                  <p><strong>Design Life:</strong> {formData.design_life} years</p>
+                </div>
+
+                {formData.primary_goal_ids.length > 0 && (
+                  <div>
+                    <h4 className="font-medium text-gray-900">Goals</h4>
+                    <div className="flex flex-wrap gap-2">
+                      {formData.primary_goal_ids.map(goalId => {
+                        const goal = primaryGoals.find(g => g.id === goalId);
+                        return goal ? (
+                          <span key={goalId} className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm">
+                            {goal.name}
+                          </span>
+                        ) : null;
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* ADDED: Debug information for troubleshooting */}
+                <div className="mt-6 p-4 bg-gray-50 rounded-lg">
+                  <h4 className="font-medium text-gray-900 mb-2">Data Types (Debug Info)</h4>
+                  <div className="text-xs text-gray-600 space-y-1">
+                    <p><strong>lat:</strong> {typeof formData.lat} ({formData.lat})</p>
+                    <p><strong>lon:</strong> {typeof formData.lon} ({formData.lon})</p>
+                    <p><strong>length:</strong> {typeof formData.length} ({formData.length})</p>
+                    <p><strong>width:</strong> {typeof formData.width} ({formData.width})</p>
+                    <p><strong>height:</strong> {typeof formData.height} ({formData.height})</p>
+                    <p><strong>water_depth:</strong> {typeof formData.water_depth} ({formData.water_depth})</p>
+                    <p><strong>design_life:</strong> {typeof formData.design_life} ({formData.design_life})</p>
+                  </div>
+                </div>
               </div>
             </div>
-          )}
-        </div>
-      </div>
 
-      {Object.keys(stepErrors).length > 0 && (
-        <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-          <h4 className="font-medium text-red-900 mb-2">Issues Found</h4>
-          <ul className="list-disc list-inside space-y-1">
-            {Object.values(stepErrors).map((error, index) => (
-              <li key={index} className="text-sm text-red-700">{error}</li>
-            ))}
-          </ul>
-        </div>
-      )}
+            {Object.keys(stepErrors).length > 0 && (
+              <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+                <h4 className="font-medium text-red-900 mb-2">Issues Found</h4>
+                <ul className="list-disc list-inside space-y-1">
+                  {Object.values(stepErrors).map((error, index) => (
+                    <li key={index} className="text-sm text-red-700">{error}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
-      {canSubmit && Object.keys(stepErrors).length === 0 && (
-        <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
-          <div className="flex">
-            <CheckCircle size={16} className="text-green-600 mt-0.5 mr-3" />
-            <div>
-              <h4 className="font-medium text-green-900">Ready to Create</h4>
-              <p className="text-sm text-green-700 mt-1">
-                All required information has been provided. Click "Create Project" to continue.
-              </p>
-            </div>
+            {canSubmit && Object.keys(stepErrors).length === 0 && (
+              <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                <div className="flex">
+                  <CheckCircle size={16} className="text-green-600 mt-0.5 mr-3" />
+                  <div>
+                    <h4 className="font-medium text-green-900">Ready to Create</h4>
+                    <p className="text-sm text-green-700 mt-1">
+                      All required information has been provided. Click "Create Project" to continue.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
-        </div>
-      )}
-    </div>
-  );
-
+        );
 
       default:
         return <div>Unknown step</div>;

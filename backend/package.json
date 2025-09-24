@@ -18,7 +18,7 @@
   },
   "keywords": [
     "marine",
-    "infrastructure", 
+    "infrastructure",
     "econcrete",
     "coastal",
     "project-management",
@@ -27,28 +27,28 @@
   "author": "Your Company",
   "license": "ISC",
   "dependencies": {
-    "express": "^4.18.2",
-    "sqlite3": "^5.1.6",
-    "axios": "^1.12.0",
-    "zod": "^4.1.8",
-    "cors": "^2.8.5",
-    "helmet": "^7.0.0",
-    "compression": "^1.7.4",
-    "dotenv": "^16.3.1",
+    "axios": "^1.12.2",
     "bcryptjs": "^2.4.3",
-    "jsonwebtoken": "^9.0.2",
-    "express-validator": "^7.0.1",
-    "express-rate-limit": "^6.8.1",
-    "express-slow-down": "^1.6.0",
+    "compression": "^1.7.4",
+    "connect-sqlite3": "^0.9.13",
     "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "express-rate-limit": "^6.8.1",
     "express-session": "^1.17.3",
-    "connect-sqlite3": "^0.9.13"
+    "express-slow-down": "^1.6.0",
+    "express-validator": "^7.0.1",
+    "helmet": "^7.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "sqlite3": "^5.1.6",
+    "zod": "^4.1.8"
   },
   "devDependencies": {
-    "nodemon": "^3.0.1",
+    "@types/jest": "^29.5.3",
     "jest": "^29.6.2",
-    "supertest": "^6.3.3",
-    "@types/jest": "^29.5.3"
+    "nodemon": "^3.0.1",
+    "supertest": "^6.3.3"
   },
   "engines": {
     "node": ">=16.0.0",
