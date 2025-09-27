@@ -1,4 +1,4 @@
-// frontend/src/utils/projectUtils.js - TARGETED ENHANCEMENTS FOR REVIEWER ISSUE #6
+// frontend/src/utils/projectUtils.js - COMPLETE ENHANCED VERSION FOR 400 ERROR FIX
 
 export const PROJECT_DEFAULTS = {
   lat: 32.0,
@@ -483,14 +483,92 @@ export const validateProjectData = (projectData) => {
   };
 };
 
-// ENHANCED: Your prepareProjectForAPI with better numeric guarantees
+// CRITICAL FIX: Map wizard data to backend schema format
+const mapWizardDataToBackend = (wizardData) => {
+  // Map structure types to backend expected values
+  const structureTypeMap = {
+    'Breakwater': 'breakwater',
+    'Seawall': 'seawall', 
+    'Pier': 'pier',
+    'Jetty': 'jetty',
+    'Artificial Reef': 'artificial_reef',
+    'Coastal Protection': 'coastal_protection',
+    // Handle both cases
+    'breakwater': 'breakwater',
+    'seawall': 'seawall',
+    'pier': 'pier',
+    'jetty': 'jetty',
+    'artificial_reef': 'artificial_reef',
+    'coastal_protection': 'coastal_protection'
+  };
+
+  // Helper function to safely format dates
+  const formatDate = (dateInput) => {
+    if (!dateInput) return null;
+    
+    try {
+      const date = new Date(dateInput);
+      if (isNaN(date.getTime())) return null;
+      
+      // Return ISO string format that backend expects
+      return date.toISOString().split('T')[0]; // YYYY-MM-DD
+    } catch (error) {
+      console.error('Date formatting error:', error);
+      return null;
+    }
+  };
+
+  // Build the payload that matches backend schema EXACTLY
+  const payload = {
+    // Required fields - map wizard field names to backend field names
+    name: wizardData.projectName || wizardData.name || '',
+    location: wizardData.location || '',
+    type: structureTypeMap[wizardData.structureType] || structureTypeMap[wizardData.type] || wizardData.type || '',
+    
+    // Optional fields with safe conversion
+    status: wizardData.status || 'planned',
+    budget: parseNumericField(wizardData.budget || wizardData.estimatedCost, null, 'budget'),
+    start_date: formatDate(wizardData.startDate || wizardData.start_date),
+    end_date: formatDate(wizardData.endDate || wizardData.end_date),
+    
+    // Additional fields if backend supports them
+    client_name: wizardData.clientName || wizardData.client_name || null,
+    project_manager: wizardData.projectManager || wizardData.project_manager || null,
+    
+    // Handle dimensions if provided
+    ...(wizardData.dimensions && {
+      length: parseNumericField(wizardData.dimensions.length, null, 'length'),
+      width: parseNumericField(wizardData.dimensions.width, null, 'width'),
+      height: parseNumericField(wizardData.dimensions.height, null, 'height'),
+      depth: parseNumericField(wizardData.dimensions.depth, null, 'depth')
+    })
+  };
+
+  // Remove null/undefined values to avoid backend issues
+  Object.keys(payload).forEach(key => {
+    if (payload[key] === null || payload[key] === undefined || payload[key] === '') {
+      delete payload[key];
+    }
+  });
+
+  return payload;
+};
+
+// ENHANCED: Your prepareProjectForAPI with backend schema mapping
 export const prepareProjectForAPI = (projectData) => {
   if (!projectData) return null;
   
-  // First ensure defaults
-  const prepared = ensureProjectDefaults(projectData);
+  console.log('Original wizard data:', projectData);
   
-  // Then do final preparation with guaranteed numeric types
+  // Step 1: Map wizard data to backend schema format
+  const mappedData = mapWizardDataToBackend(projectData);
+  console.log('Mapped to backend schema:', mappedData);
+  
+  // Step 2: Ensure defaults and validate
+  const prepared = ensureProjectDefaults(mappedData);
+  console.log('After ensuring defaults:', prepared);
+  
+  // Step 3: Final preparation with guaranteed numeric types
   const { latitude, longitude } = parseCoordinates(prepared.lat, prepared.lon);
   const { length, width, height } = parseDimensions(prepared);
   
@@ -548,6 +626,7 @@ export const prepareProjectForAPI = (projectData) => {
     }
   });
   
+  console.log('Final API-ready payload:', apiReady);
   return apiReady;
 };
 

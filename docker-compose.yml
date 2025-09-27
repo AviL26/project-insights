@@ -1,0 +1,650 @@
+# ECOncrete Wizard Deployment Package
+# Week 4: Days 5-7 - Production Deployment
+
+# 1. Docker Configuration
+# File: /Users/avilapp/econcrete/docker-compose.yml
+version: '3.8'
+
+services:
+  # Frontend React App
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    ports:
+      - "3000:80"
+    environment:
+      - NODE_ENV=production
+      - REACT_APP_API_URL=http://backend:3001
+    depends_on:
+      - backend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Backend Node.js API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/econcrete
+      - REDIS_URL=redis://redis:6379
+      - REST_COUNTRIES_URL=https://restcountries.com/v3.1
+      - PORT=3001
+      - JWT_SECRET=${JWT_SECRET}
+    depends_on:
+      - db
+      - redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # PostgreSQL Database
+  db:
+    image: postgres:14-alpine
+    environment:
+      - POSTGRES_DB=econcrete
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/migrations:/docker-entrypoint-initdb.d
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Nginx Reverse Proxy (Optional for production)
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/ssl:/etc/nginx/ssl
+    depends_on:
+      - frontend
+      - backend
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+
+# 2. Environment Configuration
+# File: /Users/avilapp/econcrete/.env.production
+---
+# Production Environment Variables
+NODE_ENV=production
+DATABASE_URL=postgresql://postgres:secure_password@localhost:5432/econcrete
+REDIS_URL=redis://localhost:6379
+REST_COUNTRIES_URL=https://restcountries.com/v3.1
+PORT=3001
+JWT_SECRET=your-super-secure-jwt-secret-here
+POSTGRES_PASSWORD=secure_database_password
+
+# Frontend Environment
+REACT_APP_API_URL=https://api.econcrete.yoursite.com
+REACT_APP_ENVIRONMENT=production
+
+# Optional: External Services
+SENTRY_DSN=your-sentry-dsn-for-error-tracking
+GOOGLE_ANALYTICS_ID=your-ga-id
+
+# 3. Frontend Production Dockerfile
+# File: /Users/avilapp/econcrete/frontend/Dockerfile.prod
+---
+# Multi-stage build for optimized production image
+FROM node:18-alpine AS builder
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+RUN npm ci --only=production
+
+# Copy source code
+COPY . .
+
+# Build the app
+RUN npm run build
+
+# Production stage
+FROM nginx:alpine
+
+# Copy built app to nginx
+COPY --from=builder /app/build /usr/share/nginx/html
+
+# Copy nginx configuration
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# Add health check
+COPY health-check.html /usr/share/nginx/html/health
+
+# Expose port
+EXPOSE 80
+
+# Start nginx
+CMD ["nginx", "-g", "daemon off;"]
+
+# 4. Backend Production Dockerfile
+# File: /Users/avilapp/econcrete/backend/Dockerfile.prod
+---
+FROM node:18-alpine
+
+# Create app directory
+WORKDIR /app
+
+# Install app dependencies
+COPY package*.json ./
+RUN npm ci --only=production
+
+# Copy app source
+COPY . .
+
+# Create non-root user
+RUN addgroup -g 1001 -S nodejs
+RUN adduser -S nodeuser -u 1001
+
+# Change ownership
+RUN chown -R nodeuser:nodejs /app
+USER nodeuser
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:3001/health || exit 1
+
+# Expose port
+EXPOSE 3001
+
+# Start the application
+CMD ["node", "server.js"]
+
+# 5. Nginx Configuration
+# File: /Users/avilapp/econcrete/nginx/nginx.conf
+---
+events {
+    worker_connections 1024;
+}
+
+http {
+    upstream frontend {
+        server frontend:80;
+    }
+
+    upstream backend {
+        server backend:3001;
+    }
+
+    # Rate limiting
+    limit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;
+
+    server {
+        listen 80;
+        server_name _;
+
+        # Security headers
+        add_header X-Frame-Options DENY;
+        add_header X-Content-Type-Options nosniff;
+        add_header X-XSS-Protection "1; mode=block";
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+        # Gzip compression
+        gzip on;
+        gzip_types text/plain text/css application/json application/javascript text/xml application/xml;
+
+        # Frontend routes
+        location / {
+            proxy_pass http://frontend;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        # API routes with rate limiting
+        location /api/ {
+            limit_req zone=api burst=20 nodelay;
+            proxy_pass http://backend;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            
+            # CORS headers
+            add_header Access-Control-Allow-Origin *;
+            add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS";
+            add_header Access-Control-Allow-Headers "Content-Type, Authorization";
+        }
+
+        # Health check endpoint
+        location /health {
+            access_log off;
+            return 200 "healthy\n";
+            add_header Content-Type text/plain;
+        }
+    }
+}
+
+# 6. Testing Strategy Implementation
+# File: /Users/avilapp/econcrete/frontend/src/tests/wizard.test.js
+---
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import ProjectSetupWizard from '../components/ProjectSetup/ProjectSetupWizard';
+import { STATIC_WIZARD_DATA } from '../data/staticWizardData';
+
+// Mock API service
+jest.mock('../services/api');
+
+describe('ECOncrete Project Wizard', () => {
+  // Unit Tests (Essential Only - per guide)
+  
+  test('validates required fields in step 1', async () => {
+    render(<ProjectSetupWizard />);
+    
+    // Try to proceed without filling required fields
+    const nextButton = screen.getByText('Next');
+    fireEvent.click(nextButton);
+    
+    // Should show validation errors
+    expect(screen.getByText('Project name is required')).toBeInTheDocument();
+    expect(screen.getByText('Country is required')).toBeInTheDocument();
+    expect(screen.getByText('Primary goal is required')).toBeInTheDocument();
+  });
+
+  test('allows navigation between completed steps', async () => {
+    const user = userEvent.setup();
+    render(<ProjectSetupWizard />);
+    
+    // Fill required fields
+    await user.type(screen.getByLabelText(/project name/i), 'Test Project');
+    await user.selectOptions(screen.getByLabelText(/country/i), 'US');
+    await user.click(screen.getByLabelText(/coastal protection/i));
+    
+    // Should be able to proceed
+    await user.click(screen.getByText('Next'));
+    expect(screen.getByText('Environment')).toBeInTheDocument();
+    
+    // Should be able to go back
+    await user.click(screen.getByText('Previous'));
+    expect(screen.getByDisplayValue('Test Project')).toBeInTheDocument();
+  });
+
+  test('uses fallback data when API fails', async () => {
+    // Mock API failure
+    const mockApi = require('../services/api');
+    mockApi.get.mockRejectedValue(new Error('Network error'));
+    
+    render(<ProjectSetupWizard />);
+    
+    await waitFor(() => {
+      expect(screen.getByText('United States')).toBeInTheDocument();
+    });
+  });
+
+  // Integration Tests (Key Flows - per guide)
+  
+  test('complete wizard flow with valid data', async () => {
+    const user = userEvent.setup();
+    const mockComplete = jest.fn();
+    
+    render(<ProjectSetupWizard onComplete={mockComplete} />);
+    
+    // Step 1: Basics
+    await user.type(screen.getByLabelText(/project name/i), 'Integration Test Project');
+    await user.selectOptions(screen.getByLabelText(/country/i), 'US');
+    await user.click(screen.getByLabelText(/marine habitat/i));
+    await user.click(screen.getByText('Next'));
+    
+    // Step 2: Environment
+    await user.click(screen.getByLabelText(/sandy/i));
+    await user.click(screen.getByLabelText(/medium/i));
+    await user.click(screen.getByText('Next'));
+    
+    // Step 3: Design
+    await user.click(screen.getByLabelText(/artificial reef/i));
+    await user.click(screen.getByText('Next'));
+    
+    // Step 4: Context (optional)
+    await user.click(screen.getByText('Next'));
+    
+    // Step 5: Review and Submit
+    expect(screen.getByText('Integration Test Project')).toBeInTheDocument();
+    expect(screen.getByText('Create Project')).toBeInTheDocument();
+  });
+});
+
+# 7. Performance Testing Script
+# File: /Users/avilapp/econcrete/performance-test.js
+---
+const puppeteer = require('puppeteer');
+
+async function runPerformanceTests() {
+  const browser = await puppeteer.launch({ headless: false });
+  const page = await browser.newPage();
+  
+  // Test initial load time (target: < 3 seconds)
+  console.log('Testing initial load time...');
+  const startTime = Date.now();
+  
+  await page.goto('http://localhost:3000/wizard');
+  await page.waitForSelector('[data-testid="wizard-container"]');
+  
+  const loadTime = Date.now() - startTime;
+  console.log(`Initial load time: ${loadTime}ms`);
+  
+  if (loadTime > 3000) {
+    console.warn('⚠️  Load time exceeds 3 second target');
+  } else {
+    console.log('✅ Load time within target');
+  }
+  
+  // Test step transitions (target: < 500ms)
+  console.log('Testing step transitions...');
+  
+  // Fill required fields
+  await page.type('[data-testid="project-name"]', 'Performance Test');
+  await page.select('[data-testid="country-select"]', 'US');
+  await page.click('[data-testid="goal-coastal-protection"]');
+  
+  // Measure transition time
+  const transitionStart = Date.now();
+  await page.click('[data-testid="next-button"]');
+  await page.waitForSelector('[data-testid="environment-step"]');
+  const transitionTime = Date.now() - transitionStart;
+  
+  console.log(`Step transition time: ${transitionTime}ms`);
+  
+  if (transitionTime > 500) {
+    console.warn('⚠️  Transition time exceeds 500ms target');
+  } else {
+    console.log('✅ Transition time within target');
+  }
+  
+  await browser.close();
+}
+
+runPerformanceTests().catch(console.error);
+
+# 8. Production Deployment Script
+# File: /Users/avilapp/econcrete/deploy.sh
+---
+#!/bin/bash
+
+# ECOncrete Wizard Production Deployment Script
+set -e
+
+echo "🚀 Starting ECOncrete Wizard deployment..."
+
+# Load environment variables
+if [ -f .env.production ]; then
+    export $(cat .env.production | xargs)
+fi
+
+# Build and start services
+echo "📦 Building Docker images..."
+docker-compose -f docker-compose.yml build --no-cache
+
+echo "🔧 Starting services..."
+docker-compose -f docker-compose.yml up -d
+
+# Wait for services to be healthy
+echo "⏳ Waiting for services to be healthy..."
+timeout 60 bash -c 'until docker-compose ps | grep healthy; do sleep 5; done'
+
+# Run health checks
+echo "🏥 Running health checks..."
+
+# Check frontend
+if curl -f http://localhost:3000/health > /dev/null 2>&1; then
+    echo "✅ Frontend is healthy"
+else
+    echo "❌ Frontend health check failed"
+    exit 1
+fi
+
+# Check backend
+if curl -f http://localhost:3001/health > /dev/null 2>&1; then
+    echo "✅ Backend is healthy"
+else
+    echo "❌ Backend health check failed"
+    exit 1
+fi
+
+# Check database
+if docker-compose exec db pg_isready -U postgres > /dev/null 2>&1; then
+    echo "✅ Database is healthy"
+else
+    echo "❌ Database health check failed"
+    exit 1
+fi
+
+# Run performance tests
+echo "📊 Running performance tests..."
+npm run test:performance
+
+echo "🎉 Deployment completed successfully!"
+echo "📍 Application is running at http://localhost:3000"
+echo "📍 API is available at http://localhost:3001"
+
+# 9. User Documentation
+# File: /Users/avilapp/econcrete/docs/USER_GUIDE.md
+---
+# ECOncrete Project Wizard - User Guide
+
+## Overview
+The ECOncrete Project Wizard helps you create marine construction projects with ecological benefits through a simple 5-step process.
+
+## Getting Started
+
+### Step 1: Project Basics
+- **Project Name**: Enter a descriptive name for your project
+- **Location**: Select your country and optionally a city
+- **Primary Goal**: Choose your main objective:
+  - Coastal Protection: Protect shoreline from erosion
+  - Marine Habitat Enhancement: Create biodiversity
+  - Marine Infrastructure: Build functional structures
+  - Ecosystem Restoration: Restore damaged habitats
+
+### Step 2: Environment
+- **Seabed Type**: Select the substrate at your project site
+- **Wave Exposure**: Choose the wave conditions
+- **Nearby Structures**: Optional - select existing structures
+
+### Step 3: Design Choices
+- **Structure Types**: Select one or more structure types to build
+- **Preferred Materials**: Optional - choose preferred materials
+
+### Step 4: Additional Context (Optional)
+- **Target Species**: Select marine species to support
+- **Environmental Factors**: Choose relevant considerations
+- **Regulatory Notes**: Add any regulatory requirements
+
+### Step 5: Review & Submit
+- Review all project details
+- Submit to create your project
+
+## Tips for Success
+1. **Be Specific**: Use descriptive project names
+2. **Consider Location**: Local conditions affect recommendations
+3. **Think Ecosystem**: Consider the full marine environment
+4. **Plan Ahead**: Include regulatory requirements early
+
+## Troubleshooting
+- **Slow Loading**: Check internet connection
+- **Validation Errors**: Ensure all required fields are completed
+- **Missing Cities**: City lists cover major coastal areas only
+
+## Support
+For technical support or questions about marine construction best practices, contact our support team.
+
+# 10. API Documentation
+# File: /Users/avilapp/econcrete/docs/API.md
+---
+# ECOncrete Wizard API Documentation
+
+## Base URL
+```
+Production: https://api.econcrete.yoursite.com
+Development: http://localhost:3001
+```
+
+## Authentication
+Currently no authentication required for wizard endpoints.
+
+## Endpoints
+
+### GET /api/wizard/bootstrap
+Get all wizard configuration data.
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "countries": [...],
+    "cities": {...},
+    "primaryGoals": [...],
+    "seabedTypes": [...],
+    "waveExposure": [...],
+    "structureTypes": [...],
+    "materials": [...],
+    "species": [...],
+    "environmentalFactors": [...]
+  }
+}
+```
+
+### POST /api/wizard/projects
+Create a new project.
+
+**Request Body:**
+```json
+{
+  "name": "string",
+  "countryCode": "string",
+  "cityId": "string",
+  "primaryGoal": "string",
+  "seabedType": "string", 
+  "waveExposure": "string",
+  "structureTypes": ["string"],
+  "preferredMaterials": ["string"],
+  "targetSpecies": ["string"],
+  "regulatoryNotes": "string"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "string",
+    "recommendations": {
+      "materials": [...],
+      "species": [...],
+      "compliance": [...]
+    }
+  }
+}
+```
+
+### GET /health
+Health check endpoint.
+
+**Response:**
+```
+healthy
+```
+
+## Error Handling
+All endpoints return errors in this format:
+```json
+{
+  "success": false,
+  "error": "Error message",
+  "code": "ERROR_CODE"
+}
+```
+
+# 11. Deployment Checklist
+# File: /Users/avilapp/econcrete/DEPLOYMENT_CHECKLIST.md
+---
+# Production Deployment Checklist
+
+## Pre-Deployment
+- [ ] Environment variables configured
+- [ ] Database migrations ready
+- [ ] SSL certificates obtained
+- [ ] Domain DNS configured
+- [ ] Backup strategy implemented
+
+## Build & Test
+- [ ] Frontend build successful
+- [ ] Backend build successful
+- [ ] Unit tests passing
+- [ ] Integration tests passing
+- [ ] Performance tests meet targets (< 3s load, < 500ms transitions)
+
+## Security
+- [ ] Security headers configured
+- [ ] Rate limiting enabled
+- [ ] Database credentials secured
+- [ ] API endpoints protected
+- [ ] CORS properly configured
+
+## Monitoring
+- [ ] Health checks implemented
+- [ ] Error tracking configured (Sentry)
+- [ ] Performance monitoring enabled
+- [ ] Logging configured
+- [ ] Alerts set up
+
+## Post-Deployment
+- [ ] All services healthy
+- [ ] Frontend accessible
+- [ ] API responding
+- [ ] Database connected
+- [ ] Cache working
+- [ ] Performance targets met
+- [ ] User acceptance testing completed
+
+## Success Metrics (Per Guide)
+- [ ] Initial load: < 3 seconds
+- [ ] Step transitions: < 500ms  
+- [ ] 99% uptime
+- [ ] 60% completion rate target
+- [ ] < 5% error rate
+
+## Rollback Plan
+- [ ] Previous version tagged
+- [ ] Rollback script tested
+- [ ] Database rollback plan
+- [ ] Communication plan ready

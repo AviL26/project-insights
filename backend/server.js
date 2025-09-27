@@ -1,3 +1,4 @@
+// File Location: /Users/avilapp/econcrete/backend/server.js
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -18,6 +19,7 @@ const complianceRouter = require('./routes/compliance');
 const authRouter = require('./routes/auth');
 const lookupsRouter = require('./routes/lookups');
 const geographicLookupsRouter = require('./routes/geographic-lookups');
+const wizardRouter = require('./routes/wizard');  // Added wizard routes
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -86,6 +88,11 @@ app.get('/api/docs', (req, res) => {
         'DELETE /api/projects/:id': 'Delete project',
         'GET /api/projects/by-status/:status': 'Get projects by status'
       },
+      wizard: {
+        'GET /api/wizard/bootstrap': 'Get wizard initialization data',
+        'GET /api/wizard/cities/:countryCode': 'Get cities for country',
+        'POST /api/wizard/projects': 'Create project from wizard'
+      },
       geographic: {
         'GET /api/lookup/countries': 'Get coastal countries',
         'GET /api/lookup/regions/:countryCode': 'Get regions for country',
@@ -105,6 +112,7 @@ app.get('/api/docs', (req, res) => {
       }
     },
     features: [
+      'Project Setup Wizard with 5-step configuration',
       'Geographic API integration with REST Countries and Nominatim',
       'Real-time country and region data',
       'Marine zone identification',
@@ -121,6 +129,7 @@ app.use('/api/materials', materialsRouter);
 app.use('/api/compliance', complianceRouter);
 app.use('/api/lookups', lookupsRouter);
 app.use('/api/lookup', geographicLookupsRouter); // This is the key route for your wizard
+app.use('/api/wizard', wizardRouter);  // Added wizard routes
 
 // 404 handler
 app.use(notFoundHandler);
@@ -177,6 +186,7 @@ const startServer = async () => {
    ✅ Authentication System
    ✅ Material Management
    ✅ Lookup Tables for Wizard
+   ✅ Project Setup Wizard (5-step configuration)
       `);
     });
 
