@@ -199,10 +199,10 @@ router.get('/by-status/:status', cacheMiddleware(180000), asyncHandler(async (re
   const { status } = req.params;
   
   // Map frontend categories to database statuses
-  const statusMapping = {
-    'active': ['planning', 'design', 'permitting', 'construction', 'planned'],
-    'archived': ['completed', 'cancelled', 'on_hold']
-  };
+const statusMapping = {
+  'active': ['planning', 'design', 'permitting', 'construction', 'planned'],
+  'archived': ['completed', 'cancelled', 'on_hold', 'archived']
+};
   
   // Validate status parameter
   if (!statusMapping[status]) {
@@ -435,7 +435,7 @@ router.post('/', asyncHandler(async (req, res) => {
     name: sanitizeInput(req.body.name),
     location: sanitizeInput(req.body.location),
     type: req.body.type,
-    status: req.body.status || 'planned',
+    status: req.body.status || 'planning',
     
     // Optional text fields
     description: sanitizeInput(req.body.description || ''),
@@ -777,6 +777,176 @@ router.get('/stats', cacheMiddleware(300000), asyncHandler(async (req, res) => {
     const duration = Date.now() - startTime;
     performanceMonitor.trackQuery('SELECT project statistics', duration, false);
     throw new DatabaseError('Failed to fetch project statistics', error);
+  }
+}));
+
+// Add these routes to your backend/routes/projects.js file:
+
+// Archive a project
+router.put('/:id/archive', asyncHandler(async (req, res) => {
+  const startTime = Date.now();
+  const projectId = parseInt(req.params.id);
+  
+  if (isNaN(projectId)) {
+    throw new ValidationError('Invalid project ID', [{
+      field: 'id',
+      message: 'Project ID must be a valid number'
+    }]);
+  }
+  
+  try {
+    const result = await dbService.transaction(async (tx) => {
+      const existingProject = await tx.get('SELECT * FROM projects WHERE id = ?', [projectId]);
+      if (!existingProject) {
+        throw new NotFoundError('Project');
+      }
+      
+      // Update status to archived (or whatever status represents archived in your system)
+      await tx.run('UPDATE projects SET status = ?, updated_at = datetime(\'now\') WHERE id = ?', ['archived', projectId]);
+      
+      const updatedProject = await tx.get('SELECT * FROM projects WHERE id = ?', [projectId]);
+      return updatedProject;
+    });
+    
+    invalidateProjectCache();
+    
+    res.json({
+      success: true,
+      message: 'Project archived successfully',
+      data: result
+    });
+    
+  } catch (error) {
+    if (error instanceof NotFoundError) {
+      throw error;
+    }
+    throw new DatabaseError('Failed to archive project', error);
+  }
+}));
+
+// Restore a project
+router.put('/:id/restore', asyncHandler(async (req, res) => {
+  const startTime = Date.now();
+  const projectId = parseInt(req.params.id);
+  
+  if (isNaN(projectId)) {
+    throw new ValidationError('Invalid project ID', [{
+      field: 'id',
+      message: 'Project ID must be a valid number'
+    }]);
+  }
+  
+  try {
+    const result = await dbService.transaction(async (tx) => {
+      const existingProject = await tx.get('SELECT * FROM projects WHERE id = ?', [projectId]);
+      if (!existingProject) {
+        throw new NotFoundError('Project');
+      }
+      
+      // Update status back to planning or active
+      await tx.run('UPDATE projects SET status = ?, updated_at = datetime(\'now\') WHERE id = ?', ['planning', projectId]);
+      
+      const updatedProject = await tx.get('SELECT * FROM projects WHERE id = ?', [projectId]);
+      return updatedProject;
+    });
+    
+    invalidateProjectCache();
+    
+    res.json({
+      success: true,
+      message: 'Project restored successfully',
+      data: result
+    });
+    
+  } catch (error) {
+    if (error instanceof NotFoundError) {
+      throw error;
+    }
+    throw new DatabaseError('Failed to restore project', error);
+  }
+}));
+
+// Bulk archive
+router.put('/bulk-archive', asyncHandler(async (req, res) => {
+  const { projectIds } = req.body;
+  
+  if (!Array.isArray(projectIds) || projectIds.length === 0) {
+    throw new ValidationError('projectIds array is required');
+  }
+  
+  try {
+    const placeholders = projectIds.map(() => '?').join(',');
+    const result = await dbService.run(
+      `UPDATE projects SET status = 'archived', updated_at = datetime('now') WHERE id IN (${placeholders})`,
+      projectIds
+    );
+    
+    invalidateProjectCache();
+    
+    res.json({
+      success: true,
+      data: { archivedCount: result.changes }
+    });
+    
+  } catch (error) {
+    throw new DatabaseError('Failed to archive projects', error);
+  }
+}));
+
+// Permanent delete
+router.delete('/:id/permanent', asyncHandler(async (req, res) => {
+  const projectId = parseInt(req.params.id);
+  
+  if (isNaN(projectId)) {
+    throw new ValidationError('Invalid project ID');
+  }
+  
+  try {
+    const result = await dbService.run('DELETE FROM projects WHERE id = ?', [projectId]);
+    
+    if (result.changes === 0) {
+      throw new NotFoundError('Project');
+    }
+    
+    invalidateProjectCache();
+    
+    res.json({
+      success: true,
+      message: 'Project permanently deleted'
+    });
+    
+  } catch (error) {
+    if (error instanceof NotFoundError) {
+      throw error;
+    }
+    throw new DatabaseError('Failed to delete project', error);
+  }
+}));
+
+// Bulk permanent delete
+router.delete('/bulk-permanent', asyncHandler(async (req, res) => {
+  const { projectIds } = req.body;
+  
+  if (!Array.isArray(projectIds) || projectIds.length === 0) {
+    throw new ValidationError('projectIds array is required');
+  }
+  
+  try {
+    const placeholders = projectIds.map(() => '?').join(',');
+    const result = await dbService.run(
+      `DELETE FROM projects WHERE id IN (${placeholders})`,
+      projectIds
+    );
+    
+    invalidateProjectCache();
+    
+    res.json({
+      success: true,
+      data: { deletedCount: result.changes }
+    });
+    
+  } catch (error) {
+    throw new DatabaseError('Failed to delete projects', error);
   }
 }));
 

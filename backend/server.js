@@ -104,7 +104,9 @@ app.get('/api/docs', (req, res) => {
       },
       compliance: {
         'GET /api/compliance/:id': 'Get compliance data',
-        'POST /api/compliance/check': 'Check compliance'
+        'POST /api/compliance/check': 'Check compliance',
+        'GET /api/compliance/demo': 'Demo compliance data',
+        'POST /api/compliance-enhanced/check': 'Enhanced compliance check'
       },
       auth: {
         'POST /api/auth/login': 'User login',
@@ -127,6 +129,7 @@ app.use('/api/auth', authRouter);
 app.use('/api/projects', projectsRouter);
 app.use('/api/materials', materialsRouter);
 app.use('/api/compliance', complianceRouter);
+app.use('/api/compliance-enhanced', complianceRouter);
 app.use('/api/lookups', lookupsRouter);
 app.use('/api/lookup', geographicLookupsRouter); // This is the key route for your wizard
 app.use('/api/wizard', wizardRouter);  // Added wizard routes

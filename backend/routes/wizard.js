@@ -1,6 +1,7 @@
-// backend/src/routes/wizard.js
+// backend/routes/wizard.js
 const express = require('express');
 const redis = require('redis');
+const dbService = require('../db/database-service');
 const router = express.Router();
 
 // Simple cache manager
@@ -9,11 +10,17 @@ class CacheManager {
     this.client = redis.createClient({
       url: process.env.REDIS_URL || 'redis://localhost:6379'
     });
-    this.client.connect();
+    this.client.connect().catch(() => {
+      console.warn('Redis not available, using in-memory cache fallback');
+      this.memoryCache = new Map();
+    });
   }
 
   async get(key) {
     try {
+      if (this.memoryCache) {
+        return this.memoryCache.get(key) || null;
+      }
       const data = await this.client.get(key);
       return data ? JSON.parse(data) : null;
     } catch (error) {
@@ -24,6 +31,11 @@ class CacheManager {
 
   async set(key, data, ttlSeconds = 3600) {
     try {
+      if (this.memoryCache) {
+        this.memoryCache.set(key, data);
+        setTimeout(() => this.memoryCache.delete(key), ttlSeconds * 1000);
+        return;
+      }
       await this.client.setEx(key, ttlSeconds, JSON.stringify(data));
     } catch (error) {
       console.warn(`Cache set failed for ${key}:`, error);
@@ -102,7 +114,7 @@ const STATIC_LOOKUPS = {
     { id: 'seawall', name: 'Seawall', description: 'Coastal protection wall', category: 'protection' },
     { id: 'pier', name: 'Pier', description: 'Extending structure for access', category: 'infrastructure' },
     { id: 'jetty', name: 'Jetty', description: 'Structure extending into water', category: 'infrastructure' },
-    { id: 'reef', name: 'Artificial Reef', description: 'Habitat creation structure', category: 'habitat' },
+    { id: 'artificial_reef', name: 'Artificial Reef', description: 'Habitat creation structure', category: 'habitat' },
     { id: 'living-shoreline', name: 'Living Shoreline', description: 'Natural-hybrid protection', category: 'habitat' }
   ],
   
@@ -122,6 +134,14 @@ const STATIC_LOOKUPS = {
     { id: 'seagrass', name: 'Seagrass', type: 'Plant', habitat: ['sandy', 'shallow'] },
     { id: 'kelp', name: 'Kelp', type: 'Algae', habitat: ['rocky', 'subtidal'] },
     { id: 'fish-juvenile', name: 'Juvenile Fish', type: 'Fish', habitat: ['reef', 'seagrass'] }
+  ],
+  
+  environmentalFactors: [
+    { id: 'pollution', name: 'Pollution Control' },
+    { id: 'sedimentation', name: 'Sedimentation Management' },
+    { id: 'climate-change', name: 'Climate Change Adaptation' },
+    { id: 'biodiversity', name: 'Biodiversity Enhancement' },
+    { id: 'water-quality', name: 'Water Quality Improvement' }
   ]
 };
 
@@ -219,7 +239,7 @@ router.get('/cities/:countryCode', async (req, res) => {
   });
 });
 
-// Project creation endpoint
+// Project creation endpoint with database save
 router.post('/projects', async (req, res) => {
   try {
     const projectData = req.body;
@@ -235,23 +255,96 @@ router.post('/projects', async (req, res) => {
     // Generate recommendations based on selections
     const recommendations = generateRecommendations(projectData);
     
-    // In real implementation, save to database here
-    const project = {
-      id: `proj_${Date.now()}`,
-      ...projectData,
-      recommendations,
-      createdAt: new Date().toISOString()
+    // Map wizard data to database schema
+    const selectedCity = projectData.cityId ? 
+      COASTAL_CITIES[projectData.countryCode]?.find(c => c.id === projectData.cityId) : null;
+    
+    const dbData = {
+      name: projectData.name,
+      description: projectData.regulatoryNotes || `Project created via wizard. Primary goal: ${projectData.primaryGoal}`,
+      location: selectedCity ? 
+        `${selectedCity.name}, ${projectData.countryCode}` : 
+        projectData.countryCode,
+      type: projectData.structureTypes?.[0] || 'breakwater', // Use first selected structure type
+      status: 'planning',
+      
+      // Wizard-specific fields
+      length: projectData.dimensions?.length || null,
+      width: projectData.dimensions?.width || null,
+      height: projectData.dimensions?.height || null,
+      depth: projectData.dimensions?.depth || null,
+      latitude: projectData.coordinates?.lat || null,
+      longitude: projectData.coordinates?.lon || null,
+      water_depth: projectData.water_depth || null,
+      salinity: null, // Not collected in wizard yet
+      temperature: null, // Not collected in wizard yet
+      wave_height: null, // Not collected in wizard yet
+      ph_level: null, // Not collected in wizard yet
+      
+      // Convert arrays to strings for database storage
+      primary_goals: projectData.primaryGoal,
+      target_species: projectData.targetSpecies?.join(',') || null,
+      habitat_types: projectData.environmentalFactors?.join(',') || null
     };
     
+    console.log('Saving project to database:', dbData);
+    
+    // Save to database
+    const query = `
+      INSERT INTO projects (
+        name, description, location, type, status,
+        length, width, height, depth, latitude, longitude,
+        water_depth, salinity, temperature, wave_height, ph_level,
+        primary_goals, target_species, habitat_types
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+    
+    const result = await dbService.run(query, [
+      dbData.name,
+      dbData.description,
+      dbData.location,
+      dbData.type,
+      dbData.status,
+      dbData.length,
+      dbData.width,
+      dbData.height,
+      dbData.depth,
+      dbData.latitude,
+      dbData.longitude,
+      dbData.water_depth,
+      dbData.salinity,
+      dbData.temperature,
+      dbData.wave_height,
+      dbData.ph_level,
+      dbData.primary_goals,
+      dbData.target_species,
+      dbData.habitat_types
+    ]);
+    
+    console.log('Project saved successfully with ID:', result.lastID);
+    
+    // Get the created project from database
+    const createdProject = await dbService.get('SELECT * FROM projects WHERE id = ?', [result.lastID]);
+    
+    // Return success response
     res.json({
       success: true,
-      data: project
+      data: {
+        ...createdProject,
+        recommendations // Include wizard recommendations
+      },
+      meta: {
+        wizardData: projectData, // Keep original wizard data for reference
+        savedToDatabase: true,
+        projectId: result.lastID
+      }
     });
+    
   } catch (error) {
     console.error('Project creation failed:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to create project'
+      error: 'Failed to create project: ' + error.message
     });
   }
 });

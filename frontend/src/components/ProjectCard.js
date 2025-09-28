@@ -1,8 +1,8 @@
-// frontend/src/components/ProjectCard.js - PERFORMANCE OPTIMIZED
+// frontend/src/components/ProjectCard.js - ENHANCED WITH WIZARD INTEGRATION & TYPE SAFETY
 import React, { memo, useCallback, useMemo } from 'react';
 import { 
   MapPin, Calendar, Waves, Leaf, ArrowRight, Archive,
-  ArchiveRestore, Trash2
+  ArchiveRestore, Trash2, Target, Fish, Anchor
 } from 'lucide-react';
 
 // PERFORMANCE: Memoized ProjectCard to prevent unnecessary re-renders
@@ -54,14 +54,41 @@ const ProjectCard = memo(({
     onSelectProject(project);
   }, [onSelectProject, project]);
 
-  // PERFORMANCE: Memoized computed values
-  const computedValues = useMemo(() => ({
-    projectName: project.name || `Project ${project.id}`,
-    projectType: project.type || 'Marine Infrastructure',
-    projectLocation: project.location || 'Location not specified',
-    formattedDate: formatDate(project.lastModified),
-    progressPercentage: project.progress || 0
-  }), [project, formatDate]);
+  // ENHANCED: Memoized computed values including wizard data with type safety
+  const computedValues = useMemo(() => {
+    const hasWizardData = !!(project.primary_goals || project.target_species || project.habitat_types);
+    const hasCoordinates = project.latitude && project.longitude;
+    
+    // Type-safe array splitting
+    const targetSpecies = project.target_species && typeof project.target_species === 'string' 
+      ? project.target_species.split(',').filter(Boolean) 
+      : [];
+    const habitatTypes = project.habitat_types && typeof project.habitat_types === 'string' 
+      ? project.habitat_types.split(',').filter(Boolean) 
+      : [];
+    
+    // Safe date handling
+    const dateValue = project.lastModified || project.updated_at || new Date();
+    
+    return {
+      projectName: project.name || `Project ${project.id}`,
+      projectType: project.type || 'Marine Infrastructure',
+      projectLocation: project.location || 'Location not specified',
+      formattedDate: formatDate(dateValue),
+      progressPercentage: Math.max(0, Math.min(100, project.progress || 0)),
+      hasWizardData,
+      hasCoordinates,
+      // Safe coordinate parsing with fallbacks
+      coordinates: hasCoordinates ? {
+        lat: (parseFloat(project.latitude) || 0).toFixed(3),
+        lng: (parseFloat(project.longitude) || 0).toFixed(3)
+      } : null,
+      primaryGoal: project.primary_goals,
+      targetSpecies,
+      habitatTypes,
+      isWizardProject: hasWizardData || hasCoordinates
+    };
+  }, [project, formatDate]);
 
   // PERFORMANCE: Memoized CSS classes
   const cardClasses = useMemo(() => {
@@ -177,15 +204,24 @@ const ProjectCard = memo(({
         </div>
       )}
 
-      {/* Archive Status Badge */}
-      {isArchivedView && (
-        <div className="absolute top-4 right-4 z-10">
+      {/* Status Badges */}
+      <div className="absolute top-4 right-4 z-10 flex items-center space-x-2">
+        {/* Wizard Project Badge */}
+        {computedValues.isWizardProject && (
+          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+            <Anchor size={12} className="mr-1" />
+            Wizard
+          </span>
+        )}
+        
+        {/* Archive Status Badge */}
+        {isArchivedView && (
           <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-700">
             <Archive size={12} className="mr-1" />
             Archived
           </span>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Project Header */}
       <div className={`p-6 ${selectionMode ? 'pl-12' : ''}`}>
@@ -205,11 +241,77 @@ const ProjectCard = memo(({
             <span>{computedValues.projectLocation}</span>
           </div>
           
+          {/* Coordinates Display */}
+          {computedValues.hasCoordinates && (
+            <div className="flex items-center space-x-2 text-sm text-blue-600">
+              <Target size={14} />
+              <span>{computedValues.coordinates.lat}°, {computedValues.coordinates.lng}°</span>
+            </div>
+          )}
+          
           <div className="flex items-center space-x-2 text-sm text-gray-600">
             <Calendar size={14} />
             <span>Modified {computedValues.formattedDate}</span>
           </div>
         </div>
+
+        {/* Wizard Data Display */}
+        {computedValues.hasWizardData && (
+          <div className="mt-4 p-3 bg-gradient-to-r from-blue-50 to-green-50 rounded-lg border border-blue-100">
+            <div className="text-xs font-medium text-blue-700 mb-2 flex items-center">
+              <Anchor size={12} className="mr-1" />
+              Wizard Configuration
+            </div>
+            
+            {/* Primary Goal - Type-safe string handling */}
+            {computedValues.primaryGoal && (
+              <div className="mb-2">
+                <div className="flex items-center text-xs text-blue-600 mb-1">
+                  <Target size={10} className="mr-1" />
+                  <span className="font-medium">Goal:</span>
+                </div>
+                <div className="text-xs text-blue-700 pl-3">
+                  {typeof computedValues.primaryGoal === 'string' 
+                    ? computedValues.primaryGoal.charAt(0).toUpperCase() + computedValues.primaryGoal.slice(1)
+                    : computedValues.primaryGoal
+                  }
+                </div>
+              </div>
+            )}
+            
+            {/* Target Species */}
+            {computedValues.targetSpecies.length > 0 && (
+              <div className="mb-2">
+                <div className="flex items-center text-xs text-green-600 mb-1">
+                  <Fish size={10} className="mr-1" />
+                  <span className="font-medium">Target Species:</span>
+                </div>
+                <div className="text-xs text-green-700 pl-3">
+                  {computedValues.targetSpecies.slice(0, 2).join(', ')}
+                  {computedValues.targetSpecies.length > 2 && (
+                    <span className="text-green-500"> +{computedValues.targetSpecies.length - 2} more</span>
+                  )}
+                </div>
+              </div>
+            )}
+            
+            {/* Habitat Types */}
+            {computedValues.habitatTypes.length > 0 && (
+              <div>
+                <div className="flex items-center text-xs text-emerald-600 mb-1">
+                  <Leaf size={10} className="mr-1" />
+                  <span className="font-medium">Habitat Focus:</span>
+                </div>
+                <div className="text-xs text-emerald-700 pl-3">
+                  {computedValues.habitatTypes.slice(0, 2).join(', ')}
+                  {computedValues.habitatTypes.length > 2 && (
+                    <span className="text-emerald-500"> +{computedValues.habitatTypes.length - 2} more</span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Progress Bar - only for active projects */}
         {!isArchivedView && (

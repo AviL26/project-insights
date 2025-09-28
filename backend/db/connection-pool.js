@@ -5,7 +5,7 @@ const path = require('path');
 
 class DatabaseConnectionPool {
   constructor(options = {}) {
-    this.dbPath = options.dbPath || path.join(__dirname, 'projects.db');
+    this.dbPath = options.dbPath || path.join(__dirname, 'econcretedb.sqlite');
     this.maxConnections = options.maxConnections || 10;
     this.minConnections = options.minConnections || 2;
     this.acquireTimeout = options.acquireTimeout || 30000; // 30 seconds
@@ -262,7 +262,7 @@ class DatabaseConnectionPool {
 
 // Create singleton instance
 const pool = new DatabaseConnectionPool({
-  dbPath: process.env.SQLITE_DB_PATH || path.join(__dirname, 'projects.db'),
+  dbPath: process.env.SQLITE_DB_PATH || path.join(__dirname, 'econcretedb.sqlite'),
   maxConnections: parseInt(process.env.DB_MAX_CONNECTIONS) || 10,
   minConnections: parseInt(process.env.DB_MIN_CONNECTIONS) || 2,
   acquireTimeout: parseInt(process.env.DB_ACQUIRE_TIMEOUT) || 30000,

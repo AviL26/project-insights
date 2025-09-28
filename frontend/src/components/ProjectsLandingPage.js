@@ -1,4 +1,4 @@
-// src/components/ProjectsLandingPage.js - Corrected Version
+// src/components/ProjectsLandingPage.js - ENHANCED WITH WIZARD INTEGRATION & TYPE SAFETY
 import React, { useState } from 'react';
 import { useProject } from '../context/ProjectContext';
 import { useToast, ToastContainer } from './Toast';
@@ -7,7 +7,7 @@ import ProjectCard from './ProjectCard';
 import { formatProjectLocation } from '../utils/projectUtils';
 import { 
   Plus, Search, Filter, Building2, Clock, TrendingUp, 
-  Archive, X
+  Archive, X, Anchor, Target, MapPin
 } from 'lucide-react';
 
 const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
@@ -20,7 +20,7 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
     deleteProjectPermanent, 
     bulkArchiveProjects, 
     bulkDeletePermanent,
-    clearError  // Added clearError here
+    clearError
   } = useProject();
   
   // Toast notifications
@@ -31,6 +31,7 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
   const [filterType, setFilterType] = useState('all');
   const [sortBy, setSortBy] = useState('recent');
   const [deletingProjectId, setDeletingProjectId] = useState(null);
+  const [showWizardOnly, setShowWizardOnly] = useState(false);
   
   // Multi-select state
   const [selectionMode, setSelectionMode] = useState(false);
@@ -43,22 +44,63 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
   const currentProjects = getCurrentProjects();
   const isArchivedView = state.currentView === 'archived';
 
-  // Enhanced project data with additional metadata
-  const enhancedProjects = currentProjects.map(project => ({
-    ...project,
-    lastModified: new Date(project.updated_at || Date.now() - Math.random() * 30 * 24 * 60 * 60 * 1000),
-    progress: Math.floor(Math.random() * 100),
-    type: project.structure_type || project.type || 'Marine Infrastructure',
-    location: formatProjectLocation(project)
-  }));
+  // ENHANCED: Project data with wizard field integration & type safety
+  const enhancedProjects = currentProjects.map(project => {
+    const hasWizardData = !!(project.primary_goals || project.target_species || project.habitat_types);
+    const hasCoordinates = project.latitude && project.longitude;
+    const isWizardProject = hasWizardData || hasCoordinates;
+    
+    // Safe date handling
+    const dateValue = project.updated_at || new Date();
+    const lastModified = new Date(dateValue);
+    
+    return {
+      ...project,
+      lastModified: isNaN(lastModified.getTime()) 
+        ? new Date(Date.now() - Math.random() * 30 * 24 * 60 * 60 * 1000)
+        : lastModified,
+      progress: Math.max(0, Math.min(100, Math.floor(Math.random() * 100))),
+      type: project.structure_type || project.type || 'Marine Infrastructure',
+      location: formatProjectLocation(project),
+      // Wizard integration fields with type safety
+      hasWizardData,
+      hasCoordinates,
+      isWizardProject,
+      primaryGoal: project.primary_goals,
+      coordinates: hasCoordinates ? {
+        lat: parseFloat(project.latitude) || 0,
+        lng: parseFloat(project.longitude) || 0
+      } : null,
+      targetSpecies: project.target_species && typeof project.target_species === 'string' 
+        ? project.target_species.split(',').filter(Boolean) 
+        : [],
+      habitatTypes: project.habitat_types && typeof project.habitat_types === 'string' 
+        ? project.habitat_types.split(',').filter(Boolean) 
+        : []
+    };
+  });
 
-  // Filter and sort projects using debounced search
+  // ENHANCED: Filter logic with wizard project filtering & type safety
   const filteredProjects = enhancedProjects
     .filter(project => {
-      const matchesSearch = (project.name || '').toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
-                           (project.description || '').toLowerCase().includes(debouncedSearchTerm.toLowerCase());
-      const matchesFilter = filterType === 'all' || project.type?.toLowerCase().includes(filterType.toLowerCase());
-      return matchesSearch && matchesFilter;
+      // Safe string searching with type checking
+      const searchableFields = [
+        project.name || '',
+        project.description || '',
+        typeof project.primaryGoal === 'string' ? project.primaryGoal : ''
+      ];
+      
+      const matchesSearch = searchableFields.some(field => 
+        field.toLowerCase().includes(debouncedSearchTerm.toLowerCase())
+      );
+      
+      const matchesFilter = filterType === 'all' || 
+        (project.type && typeof project.type === 'string' && 
+         project.type.toLowerCase().includes(filterType.toLowerCase()));
+      
+      const matchesWizardFilter = !showWizardOnly || project.isWizardProject;
+      
+      return matchesSearch && matchesFilter && matchesWizardFilter;
     })
     .sort((a, b) => {
       switch (sortBy) {
@@ -67,11 +109,23 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
         case 'recent':
           return new Date(b.lastModified) - new Date(a.lastModified);
         case 'progress':
-          return b.progress - a.progress;
+          return (b.progress || 0) - (a.progress || 0);
+        case 'wizard':
+          return (b.isWizardProject ? 1 : 0) - (a.isWizardProject ? 1 : 0);
         default:
           return 0;
       }
     });
+
+  // ENHANCED: Project statistics with wizard breakdown & safe calculations
+  const projectStats = {
+    total: enhancedProjects.length,
+    wizardProjects: enhancedProjects.filter(p => p.isWizardProject).length,
+    withCoordinates: enhancedProjects.filter(p => p.hasCoordinates).length,
+    withGoals: enhancedProjects.filter(p => p.primaryGoal).length,
+    inProgress: Math.floor(enhancedProjects.length * 0.7),
+    planning: Math.floor(enhancedProjects.length * 0.2)
+  };
 
   // Selection handlers
   const toggleSelectionMode = () => {
@@ -103,12 +157,14 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
     onNavigateToProject?.(project);
   };
 
-  // Project action handlers with toast notifications
+  // Project action handlers with toast notifications & enhanced messaging
   const handleArchiveProject = async (project, e) => {
     e.stopPropagation();
     
     const projectName = project.name || 'this project';
-    if (window.confirm(`Archive "${projectName}"?\n\nThe project will be moved to the Archive folder and can be restored later.`)) {
+    const wizardInfo = project.isWizardProject ? '\n\n🔧 This is a wizard-created project with enhanced configuration data.' : '';
+    
+    if (window.confirm(`Archive "${projectName}"?${wizardInfo}\n\nThe project will be moved to the Archive folder and can be restored later.`)) {
       setDeletingProjectId(project.id);
       
       try {
@@ -127,7 +183,9 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
     e.stopPropagation();
     
     const projectName = project.name || 'this project';
-    if (window.confirm(`Restore "${projectName}" from archive?\n\nThe project will be moved back to active projects.`)) {
+    const wizardInfo = project.isWizardProject ? '\n\n🔧 This wizard-created project will restore with all its configuration data.' : '';
+    
+    if (window.confirm(`Restore "${projectName}" from archive?${wizardInfo}\n\nThe project will be moved back to active projects.`)) {
       setDeletingProjectId(project.id);
       
       try {
@@ -146,7 +204,9 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
     e.stopPropagation();
     
     const projectName = project.name || 'this project';
-    const confirmMessage = `⚠️ PERMANENTLY DELETE "${projectName}"?\n\nThis will PERMANENTLY remove:\n• All project data and settings\n• Materials analysis data\n• Ecological monitoring data\n• Compliance records\n\n❌ THIS CANNOT BE UNDONE!\n\nType "DELETE" to confirm:`;
+    const wizardWarning = project.isWizardProject ? '\n⚠️ WARNING: This wizard-created project contains enhanced configuration data that will be permanently lost!' : '';
+    
+    const confirmMessage = `⚠️ PERMANENTLY DELETE "${projectName}"?${wizardWarning}\n\nThis will PERMANENTLY remove:\n• All project data and settings\n• Materials analysis data\n• Ecological monitoring data\n• Compliance records${project.isWizardProject ? '\n• Wizard configuration and goals' : ''}\n\n❌ THIS CANNOT BE UNDONE!\n\nType "DELETE" to confirm:`;
     
     const userInput = prompt(confirmMessage);
     if (userInput === 'DELETE') {
@@ -168,12 +228,16 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
     if (selectedProjects.size === 0) return;
 
     const selectedProjectsArray = Array.from(selectedProjects);
-    const selectedProjectNames = filteredProjects
-      .filter(p => selectedProjects.has(p.id))
+    const selectedProjectObjects = filteredProjects.filter(p => selectedProjects.has(p.id));
+    const wizardProjectsCount = selectedProjectObjects.filter(p => p.isWizardProject).length;
+    
+    const selectedProjectNames = selectedProjectObjects
       .map(p => p.name || `Project ${p.id}`)
       .join('", "');
 
-    if (window.confirm(`Archive ${selectedProjects.size} project${selectedProjects.size === 1 ? '' : 's'}?\n\nProjects: "${selectedProjectNames}"\n\nThese projects will be moved to Archive and can be restored later.`)) {
+    const wizardWarning = wizardProjectsCount > 0 ? `\n\n🔧 ${wizardProjectsCount} of these are wizard-created projects with enhanced data.` : '';
+
+    if (window.confirm(`Archive ${selectedProjects.size} project${selectedProjects.size === 1 ? '' : 's'}?${wizardWarning}\n\nProjects: "${selectedProjectNames}"\n\nThese projects will be moved to Archive and can be restored later.`)) {
       setBulkActionLoading(true);
       
       try {
@@ -194,12 +258,16 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
     if (selectedProjects.size === 0) return;
 
     const selectedProjectsArray = Array.from(selectedProjects);
-    const selectedProjectNames = filteredProjects
-      .filter(p => selectedProjects.has(p.id))
+    const selectedProjectObjects = filteredProjects.filter(p => selectedProjects.has(p.id));
+    const wizardProjectsCount = selectedProjectObjects.filter(p => p.isWizardProject).length;
+    
+    const selectedProjectNames = selectedProjectObjects
       .map(p => p.name || `Project ${p.id}`)
       .join('", "');
 
-    const confirmMessage = `⚠️ PERMANENTLY DELETE ${selectedProjects.size} project${selectedProjects.size === 1 ? '' : 's'}?\n\nProjects: "${selectedProjectNames}"\n\n❌ THIS CANNOT BE UNDONE!\n\nType "DELETE" to confirm:`;
+    const wizardWarning = wizardProjectsCount > 0 ? `\n\n⚠️ WARNING: ${wizardProjectsCount} wizard-created projects will lose their enhanced configuration data!` : '';
+
+    const confirmMessage = `⚠️ PERMANENTLY DELETE ${selectedProjects.size} project${selectedProjects.size === 1 ? '' : 's'}?${wizardWarning}\n\nProjects: "${selectedProjectNames}"\n\n❌ THIS CANNOT BE UNDONE!\n\nType "DELETE" to confirm:`;
     
     const userInput = prompt(confirmMessage);
     if (userInput === 'DELETE') {
@@ -220,18 +288,22 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
   };
 
   const formatDate = (date) => {
-    return new Date(date).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric'
-    });
+    try {
+      return new Date(date).toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric'
+      });
+    } catch (e) {
+      return 'Invalid Date';
+    }
   };
 
   // Empty state messages
-  const noResultsMessage = debouncedSearchTerm || filterType !== 'all' ? 'No projects found' : 
+  const noResultsMessage = debouncedSearchTerm || filterType !== 'all' || showWizardOnly ? 'No projects found' : 
                            isArchivedView ? 'No archived projects' : 'No active projects yet';
   
-  const noResultsSubMessage = debouncedSearchTerm || filterType !== 'all' 
+  const noResultsSubMessage = debouncedSearchTerm || filterType !== 'all' || showWizardOnly
     ? 'Try adjusting your search or filter criteria'
     : isArchivedView 
       ? 'Archived projects will appear here when you archive active projects'
@@ -288,14 +360,38 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
             </button>
           </div>
 
-          {/* Stats - only show for active view */}
+          {/* ENHANCED: Stats with wizard project breakdown & safe calculations */}
           {!isArchivedView && (
             <div className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
               {[
-                { label: 'Active Projects', value: state.activeProjects.length, icon: Building2, color: 'blue' },
-                { label: 'In Progress', value: Math.floor(state.activeProjects.length * 0.7), icon: TrendingUp, color: 'green' },
-                { label: 'Planning', value: Math.floor(state.activeProjects.length * 0.2), icon: Clock, color: 'yellow' },
-                { label: 'Archived', value: state.archivedProjects.length, icon: Archive, color: 'gray' }
+                { 
+                  label: 'Total Projects', 
+                  value: projectStats.total, 
+                  icon: Building2, 
+                  color: 'blue',
+                  subtitle: `${projectStats.wizardProjects} wizard-created`
+                },
+                { 
+                  label: 'Wizard Projects', 
+                  value: projectStats.wizardProjects, 
+                  icon: Anchor, 
+                  color: 'blue',
+                  subtitle: `${projectStats.withCoordinates} with coordinates`
+                },
+                { 
+                  label: 'In Progress', 
+                  value: projectStats.inProgress, 
+                  icon: TrendingUp, 
+                  color: 'green',
+                  subtitle: `${projectStats.withGoals} with defined goals`
+                },
+                { 
+                  label: 'Archived', 
+                  value: state.archivedProjects.length, 
+                  icon: Archive, 
+                  color: 'gray',
+                  subtitle: 'Stored projects'
+                }
               ].map((stat, index) => (
                 <div key={index} className="bg-white rounded-lg p-4 border">
                   <div className="flex items-center space-x-3">
@@ -305,6 +401,7 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
                     <div>
                       <p className="text-2xl font-semibold text-gray-900">{stat.value}</p>
                       <p className="text-sm text-gray-600">{stat.label}</p>
+                      <p className="text-xs text-gray-500">{stat.subtitle}</p>
                     </div>
                   </div>
                 </div>
@@ -367,7 +464,7 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
         </div>
       )}
 
-      {/* Controls */}
+      {/* Enhanced Controls with Wizard Filter */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between space-y-4 md:space-y-0">
           <div className="flex items-center space-x-4">
@@ -375,7 +472,7 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
               <Search size={18} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
               <input
                 type="text"
-                placeholder="Search projects..."
+                placeholder="Search projects, goals..."
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent w-64"
@@ -391,7 +488,21 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
               <option value="breakwater">Breakwater</option>
               <option value="pier">Pier</option>
               <option value="jetty">Jetty</option>
+              <option value="artificial_reef">Artificial Reef</option>
+              <option value="seawall">Seawall</option>
             </select>
+
+            {/* Wizard Projects Filter */}
+            <label className="flex items-center space-x-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg cursor-pointer hover:bg-blue-100 transition-colors">
+              <input
+                type="checkbox"
+                checked={showWizardOnly}
+                onChange={(e) => setShowWizardOnly(e.target.checked)}
+                className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+              />
+              <Anchor size={16} className="text-blue-600" />
+              <span className="text-sm text-blue-700">Wizard Projects Only</span>
+            </label>
           </div>
 
           <div className="flex items-center space-x-4">
@@ -403,6 +514,7 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
               <option value="recent">Recently Modified</option>
               <option value="name">Name (A-Z)</option>
               <option value="progress">Progress</option>
+              <option value="wizard">Wizard Projects First</option>
             </select>
 
             <button
@@ -428,14 +540,20 @@ const ProjectsLandingPage = ({ onNavigateToProject, onCreateNewProject }) => {
           </div>
         ) : filteredProjects.length === 0 ? (
           <div className="text-center py-12">
-            {isArchivedView ? <Archive size={48} className="mx-auto text-gray-300 mb-4" /> : <Building2 size={48} className="mx-auto text-gray-300 mb-4" />}
+            {showWizardOnly ? (
+              <Anchor size={48} className="mx-auto text-gray-300 mb-4" />
+            ) : isArchivedView ? (
+              <Archive size={48} className="mx-auto text-gray-300 mb-4" />
+            ) : (
+              <Building2 size={48} className="mx-auto text-gray-300 mb-4" />
+            )}
             <h3 className="text-lg font-semibold text-gray-600 mb-2">
               {noResultsMessage}
             </h3>
             <p className="text-gray-500 mb-6">
               {noResultsSubMessage}
             </p>
-            {!debouncedSearchTerm && filterType === 'all' && !isArchivedView && (
+            {!debouncedSearchTerm && filterType === 'all' && !isArchivedView && !showWizardOnly && (
               <button
                 onClick={onCreateNewProject}
                 className="inline-flex items-center space-x-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
