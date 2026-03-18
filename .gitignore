@@ -53,8 +53,3 @@ dist/
 *.backup
 *.bak
 
-# Migration scripts (one-time use)
-*-migrate*.js
-migration-*.js
-fix-*.js
-optimize-*.js

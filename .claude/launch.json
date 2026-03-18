@@ -4,13 +4,13 @@
     {
       "name": "backend",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--prefix", "backend"],
+      "runtimeArgs": ["run", "dev", "--workspace", "@econcrete/backend"],
       "port": 3001
     },
     {
       "name": "frontend",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["start", "--prefix", "frontend"],
+      "runtimeArgs": ["run", "dev", "--workspace", "@econcrete/frontend"],
       "port": 3000
     }
   ]
