@@ -48,6 +48,9 @@ app.get('/health', (_req, res) => res.json({ status: 'ok', timestamp: new Date()
 
 // Routes
 app.use('/api/projects', require('./routes/projects'));
+app.use('/api/materials', require('./routes/materials'));
+app.use('/api/compliance', require('./routes/compliance'));
+app.use('/api/ecological', require('./routes/ecological'));
 app.use('/api/wizard', require('./routes/wizard'));
 app.use('/api/lookups', require('./routes/lookups'));
 

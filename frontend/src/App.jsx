@@ -3,6 +3,9 @@ import { ProjectProvider } from './context/ProjectContext';
 import PageShell from './components/layout/PageShell';
 import Dashboard from './pages/Dashboard';
 import ProjectWizard from './pages/ProjectWizard';
+import Materials from './pages/Materials';
+import Compliance from './pages/Compliance';
+import Ecological from './pages/Ecological';
 
 export default function App() {
   return (
@@ -11,20 +14,12 @@ export default function App() {
         <Route element={<PageShell />}>
           <Route index element={<Dashboard />} />
           <Route path="projects/new" element={<ProjectWizard />} />
-          <Route path="materials" element={<Placeholder title="Materials Calculator" />} />
-          <Route path="compliance" element={<Placeholder title="Compliance Checklist" />} />
-          <Route path="ecological" element={<Placeholder title="Ecological Scoring" />} />
+          <Route path="materials" element={<Materials />} />
+          <Route path="compliance" element={<Compliance />} />
+          <Route path="ecological" element={<Ecological />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </ProjectProvider>
-  );
-}
-
-function Placeholder({ title }) {
-  return (
-    <div className="flex items-center justify-center h-64 text-gray-500">
-      <p className="text-lg">{title} — coming soon</p>
-    </div>
   );
 }
