@@ -23,6 +23,30 @@ export const projectsApi = {
   remove: (id) => api.delete(`/projects/${id}`).then(r => r.data),
 };
 
+export const materialsApi = {
+  catalog: () => api.get('/materials/catalog').then(r => r.data),
+  listForProject: (projectId) => api.get(`/materials/project/${projectId}`).then(r => r.data),
+  add: (projectId, data) => api.post(`/materials/project/${projectId}`, data).then(r => r.data),
+  update: (id, data) => api.put(`/materials/${id}`, data).then(r => r.data),
+  remove: (id) => api.delete(`/materials/${id}`).then(r => r.data),
+};
+
+export const complianceApi = {
+  listForProject: (projectId) => api.get(`/compliance/project/${projectId}`).then(r => r.data),
+  generate: (projectId) => api.post('/compliance/generate', { project_id: projectId }).then(r => r.data),
+  updateStatus: (id, data) => api.put(`/compliance/${id}`, data).then(r => r.data),
+  remove: (id) => api.delete(`/compliance/${id}`).then(r => r.data),
+  resetProject: (projectId) => api.delete(`/compliance/project/${projectId}`).then(r => r.data),
+};
+
+export const ecologicalApi = {
+  metrics: () => api.get('/ecological/metrics').then(r => r.data),
+  dashboard: (projectId) => api.get(`/ecological/project/${projectId}/dashboard`).then(r => r.data),
+  surveys: (projectId) => api.get(`/ecological/project/${projectId}`).then(r => r.data),
+  createSurvey: (data) => api.post('/ecological/survey', data).then(r => r.data),
+  deleteSurvey: (id) => api.delete(`/ecological/survey/${id}`).then(r => r.data),
+};
+
 export const wizardApi = {
   bootstrap: () => api.get('/wizard/bootstrap').then(r => r.data),
   complete: (data) => api.post('/wizard/complete', data).then(r => r.data),
