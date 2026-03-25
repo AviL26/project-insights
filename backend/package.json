@@ -9,8 +9,9 @@
   },
   "dependencies": {
     "@econcrete/shared": "*",
-    "better-sqlite3": "^11.7.0",
+    "axios": "^1.13.6",
     "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.7.0",
     "compression": "^1.7.4",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",

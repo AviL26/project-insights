@@ -50,6 +50,11 @@ app.get('/health', (_req, res) => res.json({ status: 'ok', timestamp: new Date()
 app.use('/api/projects', require('./routes/projects'));
 app.use('/api/wizard', require('./routes/wizard'));
 app.use('/api/lookups', require('./routes/lookups'));
+app.use('/api/climate', require('./routes/climate'));
+app.use('/api/species', require('./routes/species'));
+app.use('/api/geocode', require('./routes/geocode'));
+app.use('/api/compliance', require('./routes/compliance'));
+app.use('/api/materials', require('./routes/materials'));
 
 // Error handling
 app.use(notFoundHandler);
